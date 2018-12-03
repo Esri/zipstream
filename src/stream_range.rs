@@ -181,13 +181,12 @@ pub fn hyper_response(req: &Request<Body>, content_type: &str, etag: &str, filen
     res.header(header::CONTENT_TYPE, content_type);
     res.header(header::ACCEPT_RANGES, "bytes");
     res.header(header::ETAG, etag);
+    res.header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename));
 
     if let Some(range) = range {
         res.status(StatusCode::PARTIAL_CONTENT);
         res.header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", range.start, range.end - 1, full_len));
         log::info!("Serving range {:?}", range);
-    } else {
-        res.header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename));
     }
 
     let range = range.unwrap_or(full_range);
