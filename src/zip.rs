@@ -176,7 +176,7 @@ mod test {
     use bytes::{Bytes};
     use crate::stream_range::{ Range, StreamRange };
     use futures::{Future, Stream};
-    use std::process::{Command, Stdio};
+    use std::process::Command;
 
     fn test_entries() -> Vec<ZipEntry> {
         vec![
@@ -220,6 +220,7 @@ mod test {
 
         assert!(Command::new("zipinfo").arg("-v").arg("test.zip").status().unwrap().success());
         assert!(Command::new("unzip").arg("-t").arg("test.zip").status().unwrap().success());
+        assert!(Command::new("python3").arg("-m").arg("zipfile").arg("-t").arg("test.zip").status().unwrap().success());
     }
 
     #[test]
@@ -231,6 +232,7 @@ mod test {
 
         assert!(Command::new("zipinfo").arg("-v").arg("test64.zip").status().unwrap().success());
         assert!(Command::new("unzip").arg("-t").arg("test64.zip").status().unwrap().success());
+        assert!(Command::new("python3").arg("-m").arg("zipfile").arg("-t").arg("test64.zip").status().unwrap().success());
     }
     
 }
