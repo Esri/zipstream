@@ -17,6 +17,7 @@ extern crate clap;
 extern crate lazy_static;
 
 mod stream_range;
+mod serve_range;
 mod zip;
 mod upstream;
 mod s3url;
@@ -119,7 +120,7 @@ fn main() {
 
     let server = Server::bind(&addr)
         .serve(new_svc)
-        .map_err(|e| eprintln!("server error: {}", e));
+        .map_err(|e| log::error!("server error: {}", e));
 
     hyper::rt::run(server);
 }

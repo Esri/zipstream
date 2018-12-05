@@ -1,12 +1,25 @@
 use bytes::{Bytes, BytesMut, BufMut};
 use crate::stream_range::{ self, StreamRange };
 
-/// A file to be included in a zip archive
+/// A file to be included in a zip archive.
 pub struct ZipEntry {
+    /// Filename within the archive.
     pub archive_path: String,
-    pub last_modified: u64,
+
+    /// Contents of file.
     pub data: Box<dyn StreamRange>,
+
+    /// CRC32 checksum of the file contents.
+    /// This must be precomputed because it's included in the file header.
     pub crc: u32,
+}
+
+/// Options passed to `zip_stream`
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct ZipOptions {
+    /// Create a zip file using zip64 extensions even if the file will be under 2^32 bytes.
+    /// Otherwise, zip64 will be used only if necessary.
+    pub force_zip64: bool,
 }
 
 // Zip format spec:
@@ -139,14 +152,15 @@ fn end_of_central_directory(central_directory_offset: u64, size_of_central_direc
     buf.freeze()
 }
 
-fn zip_stream_internal(files: impl IntoIterator<Item = ZipEntry>, force_zip64: bool) -> impl StreamRange {
+/// Create a `StreamRange` that produces a ZIP file with the passed entries.
+pub fn zip_stream(files: impl IntoIterator<Item = ZipEntry>, options: ZipOptions) -> impl StreamRange {
     let mut data_parts: Vec<Box<dyn StreamRange>> = Vec::new();
     let mut central_directory_parts: Vec<Box<dyn StreamRange>> = Vec::new();
     let mut offset = 0;
 
     for file in files {
-        let local_header = local_file_header(&file, force_zip64);
-        let central_header = central_directory_file_header(&file, offset, force_zip64);
+        let local_header = local_file_header(&file, options.force_zip64);
+        let central_header = central_directory_file_header(&file, offset, options.force_zip64);
 
         offset += local_header.len() as u64 + file.data.len() as u64;
 
@@ -160,15 +174,10 @@ fn zip_stream_internal(files: impl IntoIterator<Item = ZipEntry>, force_zip64: b
     let size_of_central_directory = central_directory_parts.iter().map(|x| x.len() as u64).sum();
 
     data_parts.extend(central_directory_parts.into_iter());
-    data_parts.push(Box::new(end_of_central_directory(offset, size_of_central_directory, num_entries, force_zip64)));
+    data_parts.push(Box::new(end_of_central_directory(offset, size_of_central_directory, num_entries, options.force_zip64)));
 
     stream_range::Concatenated(data_parts)
 }
-
-pub fn zip_stream(files: impl IntoIterator<Item = ZipEntry>) -> impl StreamRange {
-    zip_stream_internal(files, false)
-}
-
 
 #[cfg(test)]
 mod test {
@@ -184,20 +193,19 @@ mod test {
                 archive_path: "foo.txt".into(),
                 data: Box::new(Bytes::from_static(&b"xx"[..])),
                 crc: 0xf8e1180f,
-                last_modified: 0,
             },
             ZipEntry {
                 archive_path: "bar.txt".into(),
                 data: Box::new(Bytes::from_static(&b"ABC"[..])),
                 crc: 0xa3830348,
-                last_modified: 0,
             }
         ]
     }
 
+    /// Exhaustively test that all subranges return the same data as a slice of the whole.
     #[test]
     fn test_concat() {
-        let zip = zip_stream(test_entries());
+        let zip = zip_stream(test_entries(), ZipOptions::default());
         let buf = zip.stream_range(Range { start: 0, end: zip.len() }).concat2().wait().unwrap();
 
         assert_eq!(zip.len(), buf.len() as u64);
@@ -211,9 +219,10 @@ mod test {
         }
     }
 
+    /// Generate a 32-bit zip file and check it with zipinfo, unzip, and python.
     #[test]
     fn test_zip32() {
-        let zip = zip_stream_internal(test_entries(), false);
+        let zip = zip_stream(test_entries(), ZipOptions { force_zip64: false });
 
         let buf = zip.stream_range(Range { start: 0, end: zip.len() }).concat2().wait().unwrap();
         std::fs::write("test.zip", &buf).unwrap();
@@ -223,9 +232,10 @@ mod test {
         assert!(Command::new("python3").arg("-m").arg("zipfile").arg("-t").arg("test.zip").status().unwrap().success());
     }
 
+    /// Generate a 64-bit zip file and check it with zipinfo, unzip, and python.
     #[test]
     fn test_zip64() {
-        let zip = zip_stream_internal(test_entries(), true);
+        let zip = zip_stream(test_entries(), ZipOptions { force_zip64: true });
 
         let buf = zip.stream_range(Range { start: 0, end: zip.len() }).concat2().wait().unwrap();
         std::fs::write("test64.zip", &buf).unwrap();

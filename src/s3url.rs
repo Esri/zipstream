@@ -4,6 +4,7 @@ use regex::Regex;
 use std::str::FromStr;
 use lazy_static::lazy_static;
 
+/// A reference to a file on Amazon S3 by bucket and key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct S3Url {
     pub bucket: String,

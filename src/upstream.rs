@@ -1,6 +1,7 @@
 use crate::Config;
-use crate::stream_range::{ hyper_response, S3Object };
-use crate::zip::{ ZipEntry, zip_stream };
+use crate::stream_range::S3Object;
+use crate::serve_range::hyper_response;
+use crate::zip::{ ZipEntry, ZipOptions, zip_stream };
 use crate::s3url::S3Url;
 
 use std::sync::Arc;
@@ -58,6 +59,7 @@ pub fn request(config: &Config, req: &Request<Body>) -> Result<Request<Body>, (S
     Ok(new_req.body(Body::empty()).unwrap())
 }
 
+/// Parse an upstream JSON response and produce a streaming zip file response
 pub fn response(s3: &Arc<S3 + Send + Sync>, req: &Request<Body>, response_body: &[u8]) -> Result<Response<Body>, (StatusCode, &'static str)> {
     let mut res: UpstreamResponse = serde_json::from_slice(response_body).map_err(|e| {
         log::error!("Invalid upstream response JSON: {}", e);
@@ -77,7 +79,7 @@ pub fn response(s3: &Arc<S3 + Send + Sync>, req: &Request<Body>, response_body: 
         ZipEntry {
             archive_path: file.archive_name,
             crc: file.crc,
-            last_modified: 0, //TODO: parse date and convert to DOS format
+            //TODO: last modified date
             data: Box::new(S3Object { 
                 s3: s3.clone(),
                 bucket: file.source.bucket,
@@ -87,7 +89,7 @@ pub fn response(s3: &Arc<S3 + Send + Sync>, req: &Request<Body>, response_body: 
         }
     }).collect();
 
-    let stream = zip_stream(entries);
+    let stream = zip_stream(entries, ZipOptions::default());
 
     Ok(hyper_response(&req, "application/zip", &etag, &res.filename, &stream))
 }
