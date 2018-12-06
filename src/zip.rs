@@ -57,7 +57,7 @@ fn test_zip_date_time() {
 
 fn local_file_header(file: &ZipEntry, force_zip64: bool) -> Bytes {
     let needs_zip64 = file.data.len() >= 0xFFFFFFFF || force_zip64;
-    let mut buf = BytesMut::with_capacity(30 + file.archive_path.len() + if needs_zip64 { 20 } else { 0 });
+    let mut buf = BytesMut::with_capacity(30 + file.archive_path.len() + if needs_zip64 { 20 } else { 0 } + 9);
 
     buf.put_u32_le(0x04034b50); // local file header signature
     buf.put_u16_le(if needs_zip64 { ZIP64_VERSION } else { BASE_VERSION } as u16); //  version needed to extract
@@ -76,7 +76,7 @@ fn local_file_header(file: &ZipEntry, force_zip64: bool) -> Bytes {
     }
 
     buf.put_u16_le(file.archive_path.len() as u16); // file name length
-    buf.put_u16_le(if needs_zip64 { 20 } else { 0 }); // extra field length
+    buf.put_u16_le(if needs_zip64 { 20 } else { 0 } + 9); // extra field length
 
     // file name
     buf.put_slice(file.archive_path.as_bytes());
@@ -88,12 +88,18 @@ fn local_file_header(file: &ZipEntry, force_zip64: bool) -> Bytes {
         buf.put_u64_le(file.data.len()); // Size of compressed data
     }
 
+    // Extended timestamp header
+    buf.put_u16_le(0x5455); // UT
+    buf.put_u16_le(5); // Length
+    buf.put_u8(1); // last modified date present
+    buf.put_u32_le(file.last_modified.timestamp() as u32); // last modified timestamp
+
     buf.freeze()
 }
 
 fn central_directory_file_header(file: &ZipEntry, offset: u64, force_zip64: bool) -> Bytes {
     let needs_zip64 = file.data.len() >= 0xFFFFFFFF || offset >= 0xFFFFFFFF || force_zip64;
-    let mut buf = BytesMut::with_capacity(46 + file.archive_path.len() + if needs_zip64 { 28 } else { 0 });
+    let mut buf = BytesMut::with_capacity(46 + file.archive_path.len() + if needs_zip64 { 28 } else { 0 } + 9);
 
     buf.put_u32_le(0x02014b50); // central file header signature
     buf.put_u8(BASE_VERSION); // version made by = zip spec 4.5
@@ -114,7 +120,7 @@ fn central_directory_file_header(file: &ZipEntry, offset: u64, force_zip64: bool
     }
     
     buf.put_u16_le(file.archive_path.len() as u16); // file name length
-    buf.put_u16_le(if needs_zip64 { 28 } else { 0 }); // extra field length
+    buf.put_u16_le(if needs_zip64 { 28 } else { 0 } + 9); // extra field length
     buf.put_u16_le(0); // file comment length
     buf.put_u16_le(0); // disk number start
     buf.put_u16_le(0); // internal file attributes
@@ -135,6 +141,12 @@ fn central_directory_file_header(file: &ZipEntry, offset: u64, force_zip64: bool
         buf.put_u64_le(file.data.len()); // Size of compressed data
         buf.put_u64_le(offset); // Offset of local header record
     }
+
+    // Extended timestamp header
+    buf.put_u16_le(0x5455); // UT
+    buf.put_u16_le(5); // Length
+    buf.put_u8(1); // last modified date present
+    buf.put_u32_le(file.last_modified.timestamp() as u32); // last modified timestamp
 
     buf.freeze()
 }
