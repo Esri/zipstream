@@ -1,6 +1,7 @@
 
-use futures::Stream;
+use futures::{ Stream, Future };
 use hyper::{Request, Response, Body, StatusCode, header};
+use bytes::Bytes;
 use crate::stream_range::{ Range, StreamRange };
 
 /// Parse an HTTP range header to a `Range`
@@ -103,4 +104,57 @@ pub fn hyper_response(req: &Request<Body>, content_type: &str, etag: &str, filen
     });
 
     res.body(Body::wrap_stream(stream)).unwrap()
+}
+
+#[test]
+fn test_base_hyper_response() {
+    let req = Request::builder()
+        .body(Body::empty()).unwrap();
+
+    let data = Bytes::from_static(b"0123456789");
+
+    let res = hyper_response(&req, "application/test", "ETAG", "foo.zip", &data);
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers().get(header::CONTENT_TYPE), Some(&header::HeaderValue::from_static("application/test")));
+    assert_eq!(res.headers().get(header::CONTENT_DISPOSITION), Some(&header::HeaderValue::from_static("attachment; filename=\"foo.zip\"")));
+    assert_eq!(res.headers().get(header::ETAG), Some(&header::HeaderValue::from_static("ETAG")));
+    assert_eq!(res.headers().get(header::CONTENT_LENGTH), Some(&header::HeaderValue::from_static("10")));
+    assert_eq!(res.into_body().concat2().wait().unwrap().as_ref(), b"0123456789");
+}
+
+#[test]
+fn test_range_hyper_response() {
+    let req = Request::builder()
+        .header(header::RANGE, "bytes=4-8")
+        .header(header::IF_RANGE, "ETAG")
+        .body(Body::empty()).unwrap();
+
+    let data = Bytes::from_static(b"0123456789");
+
+    let res = hyper_response(&req, "application/test", "ETAG", "foo.zip", &data);
+
+    assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(res.headers().get(header::CONTENT_TYPE), Some(&header::HeaderValue::from_static("application/test")));
+    assert_eq!(res.headers().get(header::ETAG), Some(&header::HeaderValue::from_static("ETAG")));
+    assert_eq!(res.headers().get(header::CONTENT_LENGTH), Some(&header::HeaderValue::from_static("5")));
+    assert_eq!(res.headers().get(header::CONTENT_RANGE), Some(&header::HeaderValue::from_static("bytes 4-8/10")));
+    assert_eq!(res.into_body().concat2().wait().unwrap().as_ref(), b"45678");
+}
+
+#[test]
+fn test_bad_if_range_hyper_response() {
+    let req = Request::builder()
+        .header(header::RANGE, "bytes=4-8")
+        .header(header::IF_RANGE, "WRONG")
+        .body(Body::empty()).unwrap();
+
+    let data = Bytes::from_static(b"0123456789");
+
+    let res = hyper_response(&req, "application/test", "ETAG", "foo.zip", &data);
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers().get(header::CONTENT_LENGTH), Some(&header::HeaderValue::from_static("10")));
+    assert_eq!(res.headers().get(header::CONTENT_RANGE), None);
+    assert_eq!(res.into_body().concat2().wait().unwrap().as_ref(), b"0123456789");
 }
