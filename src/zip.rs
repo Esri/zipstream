@@ -1,5 +1,6 @@
 use bytes::{Bytes, BytesMut, BufMut};
 use crate::stream_range::{ self, StreamRange };
+use chrono::{DateTime, Utc, Datelike, Timelike};
 
 /// A file to be included in a zip archive.
 pub struct ZipEntry {
@@ -12,6 +13,11 @@ pub struct ZipEntry {
     /// CRC32 checksum of the file contents.
     /// This must be precomputed because it's included in the file header.
     pub crc: u32,
+
+    /// Last modified date.
+    /// If you want the zip file to be reproducible for Range requests, do
+    /// not default to the current time.
+    pub last_modified: DateTime<Utc>,
 }
 
 /// Options passed to `zip_stream`
@@ -28,6 +34,27 @@ pub struct ZipOptions {
 const ZIP64_VERSION: u8 = 45;
 const BASE_VERSION: u8 = 20;
 
+fn zip_date(t: DateTime<Utc>) -> u16 {
+    let year = t.year().saturating_sub(1980) as u16;
+    let month = t.month() as u16;
+    let day = t.day() as u16;
+    day | month << 5 | year << 9
+}
+
+fn zip_time(t: DateTime<Utc>) -> u16 {
+    let second = (t.second() / 2) as u16;
+    let minute = t.minute() as u16;
+    let hour = t.hour() as u16;
+    second | minute << 5 | hour << 11  
+}
+
+#[test]
+fn test_zip_date_time() {
+    let t = "2006-10-11T15:40:56Z".parse::<DateTime<Utc>>().unwrap();
+    assert_eq!(zip_time(t), 0x7d1c);
+    assert_eq!(zip_date(t), 0x354b);
+}
+
 fn local_file_header(file: &ZipEntry, force_zip64: bool) -> Bytes {
     let needs_zip64 = file.data.len() >= 0xFFFFFFFF || force_zip64;
     let mut buf = BytesMut::with_capacity(30 + file.archive_path.len() + if needs_zip64 { 20 } else { 0 });
@@ -36,8 +63,8 @@ fn local_file_header(file: &ZipEntry, force_zip64: bool) -> Bytes {
     buf.put_u16_le(if needs_zip64 { ZIP64_VERSION } else { BASE_VERSION } as u16); //  version needed to extract
     buf.put_u16_le(0); // general purpose bit flag
     buf.put_u16_le(0); // compression method
-    buf.put_u16_le(0); // last mod file time
-    buf.put_u16_le(0); // last mod file date
+    buf.put_u16_le(zip_time(file.last_modified)); // last mod file time
+    buf.put_u16_le(zip_date(file.last_modified)); // last mod file date
     buf.put_u32_le(file.crc); // crc-32
 
     if needs_zip64 {
@@ -74,8 +101,8 @@ fn central_directory_file_header(file: &ZipEntry, offset: u64, force_zip64: bool
     buf.put_u16_le(if needs_zip64 { ZIP64_VERSION } else { BASE_VERSION } as u16); //  version needed to extract
     buf.put_u16_le(0); // general purpose bit flag
     buf.put_u16_le(0); // compression method
-    buf.put_u16_le(0); // last mod file time
-    buf.put_u16_le(0); // last mod file date
+    buf.put_u16_le(zip_time(file.last_modified)); // last mod file time
+    buf.put_u16_le(zip_date(file.last_modified)); // last mod file date
     buf.put_u32_le(file.crc); // crc-32
 
     if needs_zip64 {
@@ -193,11 +220,13 @@ mod test {
                 archive_path: "foo.txt".into(),
                 data: Box::new(Bytes::from_static(&b"xx"[..])),
                 crc: 0xf8e1180f,
+                last_modified: "2006-11-10T15:40:56Z".parse::<DateTime<Utc>>().unwrap(),
             },
             ZipEntry {
                 archive_path: "bar.txt".into(),
                 data: Box::new(Bytes::from_static(&b"ABC"[..])),
                 crc: 0xa3830348,
+                last_modified: "2018-12-06T20:15:59Z".parse::<DateTime<Utc>>().unwrap(),
             }
         ]
     }

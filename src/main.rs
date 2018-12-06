@@ -15,6 +15,7 @@ extern crate env_logger;
 extern crate log_panics;
 extern crate clap;
 extern crate lazy_static;
+extern crate chrono;
 
 mod stream_range;
 mod serve_range;

@@ -10,6 +10,7 @@ use serde_derive::Deserialize;
 use rusoto_s3::S3;
 use log;
 use std::hash::{ Hash, Hasher };
+use chrono::{DateTime, Utc};
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct ZipFileDescription {
@@ -17,6 +18,7 @@ struct ZipFileDescription {
     source: S3Url,
     length: u64,
     crc: u32,
+    last_modified: DateTime<Utc>,
 }
 
 #[derive(Deserialize, Clone, Debug, Hash)]
@@ -79,13 +81,13 @@ pub fn response(s3: &Arc<S3 + Send + Sync>, req: &Request<Body>, response_body: 
         ZipEntry {
             archive_path: file.archive_name,
             crc: file.crc,
-            //TODO: last modified date
             data: Box::new(S3Object { 
                 s3: s3.clone(),
                 bucket: file.source.bucket,
                 key: file.source.key,
                 len: file.length
-            })
+            }),
+            last_modified: file.last_modified,
         }
     }).collect();
 
