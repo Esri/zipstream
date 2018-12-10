@@ -41,7 +41,6 @@ pub struct Config {
 fn main() {
     let mut logger = env_logger::Builder::from_default_env();
     logger.filter_level(log::LevelFilter::Info);
-    logger.filter_module("zipstream", log::LevelFilter::Debug);
     logger.write_style(env_logger::WriteStyle::Never);
     logger.init();
     log_panics::init();
@@ -93,7 +92,7 @@ fn main() {
 
         service_fn(move |req|{
             let s3_client = s3_client.clone();
-            log::debug!("{:?}", req);
+            log::info!("Request: {} {}", req.method(), req.uri());
 
             future::result(upstream::request(&config, &req).map(|upstream_req| {
                 client.request(upstream_req).map_err(|e| {
@@ -102,7 +101,6 @@ fn main() {
                 })
             })).flatten().and_then(move |upstream_response| {
                 if upstream_response.headers().get("X-Zip-Stream").is_some() {
-                    log::debug!("Generating zip file");
                     Either::A(upstream_response.into_body().concat2().map_err(|e| {
                         log::error!("Failed to read upstream body: {}", e);
                         (StatusCode::SERVICE_UNAVAILABLE, "Upstream request failed")
@@ -110,7 +108,7 @@ fn main() {
                         upstream::response(&s3_client, &req, &body[..])
                     }))
                 } else {
-                    log::debug!("Proxying from upstream");
+                    log::info!("Request proxied from upstream");
                     Either::B(future::ok(upstream_response))
                 }
             }).or_else(|(status, message)| {

@@ -1,5 +1,5 @@
 use crate::Config;
-use crate::stream_range::S3Object;
+use crate::stream_range::{ StreamRange, S3Object };
 use crate::serve_range::hyper_response;
 use crate::zip::{ ZipEntry, ZipOptions, zip_stream };
 use crate::s3url::S3Url;
@@ -91,7 +91,11 @@ pub fn response(s3: &Arc<S3 + Send + Sync>, req: &Request<Body>, response_body: 
         }
     }).collect();
 
+    let num_entries = entries.len();
+
     let stream = zip_stream(entries, ZipOptions::default());
+
+    log::info!("Streaming zip file {}: {} entries, {} bytes", res.filename, num_entries, stream.len());
 
     Ok(hyper_response(&req, "application/zip", &etag, &res.filename, &stream))
 }

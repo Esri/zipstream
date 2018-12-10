@@ -66,8 +66,6 @@ impl StreamRange for S3Object {
         let len = range.len();
         let url = format!("s3://{}/{}", self.bucket, self.key);
 
-        log::debug!("Get S3 file {} {}", url, range.to_http_range_header());
-
         Box::new(self.s3.get_object(req)
             .map_err(|err| {
                 match &err {
@@ -76,7 +74,7 @@ impl StreamRange for S3Object {
                 }.into()
             })
             .map(move |res| {
-                log::debug!("S3 get complete for {}", url);
+                log::info!("S3 get complete for {}", url);
 
                 if res.content_length != Some(len as i64) {
                     log::error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
