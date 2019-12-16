@@ -1,3 +1,4 @@
+// © 2019 3D Robotics. License: Apache-2.0
 use std::sync::Arc;
 use futures::{Future, stream, Stream};
 use bytes::Bytes;

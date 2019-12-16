@@ -1,3 +1,4 @@
+// © 2019 3D Robotics. License: Apache-2.0
 use bytes::{Bytes, BytesMut, BufMut};
 use crate::stream_range::{ self, StreamRange };
 use chrono::{DateTime, Utc, Datelike, Timelike};

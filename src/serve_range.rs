@@ -1,3 +1,4 @@
+// © 2019 3D Robotics. License: Apache-2.0
 
 use futures::{ Stream, Future };
 use hyper::{Request, Response, Body, StatusCode, header};

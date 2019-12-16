@@ -1,3 +1,4 @@
+// © 2019 3D Robotics. License: Apache-2.0
 use crate::Config;
 use crate::stream_range::{ StreamRange, S3Object };
 use crate::serve_range::hyper_response;
