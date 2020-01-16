@@ -24,3 +24,5 @@ env_logger = "0.6.0"
 clap = "2"
 lazy_static = "1.1.0"
 chrono = { version = "0.4", features = ["serde"] }
+jemallocator = "0.3.0"
+jemalloc-sys = { version = "0.3.0", features = ["background_threads"] }
