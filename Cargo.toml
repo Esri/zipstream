@@ -3,6 +3,7 @@ name = "zipstream"
 version = "0.1.0"
 authors = ["Kevin Mehall <kevin.mehall@3drobotics.com>"]
 license = "Apache-2.0"
+edition = "2018"
 
 [dependencies]
 futures = "0.1.25"

@@ -1,8 +1,7 @@
 // © 2019 3D Robotics. License: Apache-2.0
 
-use futures::{ Stream, Future };
+use futures::Stream;
 use hyper::{Request, Response, Body, StatusCode, header};
-use bytes::Bytes;
 use crate::stream_range::{ Range, StreamRange };
 
 /// Parse an HTTP range header to a `Range`
@@ -74,7 +73,7 @@ fn test_range() {
 
 /// Serve a `StreamRange` in response to a `hyper` request.
 /// This handles the HTTP Range header and "206 Partial content" and associated headers if required
-pub fn hyper_response(req: &Request<Body>, content_type: &str, etag: &str, filename: &str, data: &StreamRange) -> Response<Body> {
+pub fn hyper_response(req: &Request<Body>, content_type: &str, etag: &str, filename: &str, data: &dyn StreamRange) -> Response<Body> {
     let full_len = data.len();
     let full_range = Range { start: 0, end: full_len };
 
@@ -109,6 +108,7 @@ pub fn hyper_response(req: &Request<Body>, content_type: &str, etag: &str, filen
 
 #[test]
 fn test_base_hyper_response() {
+    use {futures::Future, bytes::Bytes};
     let req = Request::builder()
         .body(Body::empty()).unwrap();
 
@@ -126,6 +126,7 @@ fn test_base_hyper_response() {
 
 #[test]
 fn test_range_hyper_response() {
+    use {futures::Future, bytes::Bytes};
     let req = Request::builder()
         .header(header::RANGE, "bytes=4-8")
         .header(header::IF_RANGE, "ETAG")
@@ -145,6 +146,7 @@ fn test_range_hyper_response() {
 
 #[test]
 fn test_bad_if_range_hyper_response() {
+    use {futures::Future, bytes::Bytes};
     let req = Request::builder()
         .header(header::RANGE, "bytes=4-8")
         .header(header::IF_RANGE, "WRONG")

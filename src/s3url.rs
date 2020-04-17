@@ -13,7 +13,7 @@ pub struct S3Url {
 }
 
 impl fmt::Display for S3Url {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "s3://{}/{}", self.bucket, self.key)
     }
 }
@@ -22,7 +22,7 @@ impl fmt::Display for S3Url {
 pub struct ParseS3UrlError;
 
 impl fmt::Display for ParseS3UrlError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Invalid s3:// URL")
     }
 }
@@ -32,10 +32,10 @@ impl FromStr for S3Url {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         lazy_static! {
-            static ref re: Regex = Regex::new(r"^s3://([^/]+)/(.+)$").unwrap();
+            static ref RE: Regex = Regex::new(r"^s3://([^/]+)/(.+)$").unwrap();
         }
 
-        let captures = re.captures(s).ok_or(ParseS3UrlError)?;
+        let captures = RE.captures(s).ok_or(ParseS3UrlError)?;
 
         Ok(S3Url {
             bucket: captures.get(1).unwrap().as_str().to_owned(),
