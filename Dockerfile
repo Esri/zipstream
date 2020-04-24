@@ -22,5 +22,6 @@ RUN cargo test --release
 FROM alpine
 RUN apk add --no-cache libgcc
 COPY --from=build /crate/target/release/zipstream /usr/local/bin/
+USER guest
 CMD ["zipstream"]
 EXPOSE 3000
