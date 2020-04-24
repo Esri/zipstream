@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "zipstream"
-version = "0.1.0"
+version = "1.0.1"
 dependencies = [
  "bytes 0.4.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.11 (registry+https://github.com/rust-lang/crates.io-index)",
