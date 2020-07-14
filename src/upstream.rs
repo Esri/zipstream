@@ -41,8 +41,7 @@ pub fn request(config: &Config, req: &Request<Body>) -> Result<Request<Body>, (S
         return Err((StatusCode::METHOD_NOT_ALLOWED, "Only GET requests allowed"))
     }
 
-    let mut new_req = Request::builder();
-    new_req.uri({
+    let mut new_req = Request::builder().uri({
         let req_path = req.uri().path_and_query().expect("request URL should have path").as_str();
 
         if !req_path.starts_with(&config.strip_prefix) {
@@ -50,12 +49,11 @@ pub fn request(config: &Config, req: &Request<Body>) -> Result<Request<Body>, (S
         }
 
         format!("{}{}", config.upstream, &req_path[config.strip_prefix.len()..]).parse::<Uri>().unwrap()
-    });
-    new_req.header("X-Via-Zip-Stream", config.via_zip_stream_header_value.clone());
+    }).header("X-Via-Zip-Stream", config.via_zip_stream_header_value.clone());
 
     for header in KEEP_HEADERS {
         if let Some(value) = req.headers().get(header) {
-            new_req.header(header, value);
+            new_req = new_req.header(header, value);
         }
     }
     

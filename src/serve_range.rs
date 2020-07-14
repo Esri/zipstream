@@ -1,6 +1,6 @@
 // © 2019 3D Robotics. License: Apache-2.0
 
-use futures::Stream;
+use futures_util::stream::TryStreamExt;
 use hyper::{Request, Response, Body, StatusCode, header};
 use crate::stream_range::{ Range, StreamRange };
 
@@ -83,21 +83,21 @@ pub fn hyper_response(req: &Request<Body>, content_type: &str, etag: &str, filen
         .and_then(|v| parse_range(v, full_len).ok())
         .and_then(|x| x);
 
-    let mut res = Response::builder();
-    res.header(header::CONTENT_TYPE, content_type);
-    res.header(header::ACCEPT_RANGES, "bytes");
-    res.header(header::ETAG, etag);
-    res.header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename));
+    let mut res = Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::ETAG, etag)
+        .header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename));
 
     if let Some(range) = range {
-        res.status(StatusCode::PARTIAL_CONTENT);
-        res.header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", range.start, range.end - 1, full_len));
+        res = res.status(StatusCode::PARTIAL_CONTENT)
+                 .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", range.start, range.end - 1, full_len));
         log::info!("Serving range {:?}", range);
     }
 
     let range = range.unwrap_or(full_range);
 
-    res.header(header::CONTENT_LENGTH, range.len());
+    res = res.header(header::CONTENT_LENGTH, range.len());
 
     let stream = data.stream_range(range).inspect_err(|err| {
         log::error!("Response stream error: {}", err);
@@ -106,9 +106,9 @@ pub fn hyper_response(req: &Request<Body>, content_type: &str, etag: &str, filen
     res.body(Body::wrap_stream(stream)).unwrap()
 }
 
-#[test]
-fn test_base_hyper_response() {
-    use {futures::Future, bytes::Bytes};
+#[tokio::test]
+async fn test_base_hyper_response() {
+    use { bytes::Bytes, hyper::body::to_bytes };
     let req = Request::builder()
         .body(Body::empty()).unwrap();
 
@@ -121,12 +121,12 @@ fn test_base_hyper_response() {
     assert_eq!(res.headers().get(header::CONTENT_DISPOSITION), Some(&header::HeaderValue::from_static("attachment; filename=\"foo.zip\"")));
     assert_eq!(res.headers().get(header::ETAG), Some(&header::HeaderValue::from_static("ETAG")));
     assert_eq!(res.headers().get(header::CONTENT_LENGTH), Some(&header::HeaderValue::from_static("10")));
-    assert_eq!(res.into_body().concat2().wait().unwrap().as_ref(), b"0123456789");
+    assert_eq!(to_bytes(res.into_body()).await.unwrap().as_ref(), b"0123456789");
 }
 
-#[test]
-fn test_range_hyper_response() {
-    use {futures::Future, bytes::Bytes};
+#[tokio::test]
+async fn test_range_hyper_response() {
+    use { bytes::Bytes, hyper::body::to_bytes };
     let req = Request::builder()
         .header(header::RANGE, "bytes=4-8")
         .header(header::IF_RANGE, "ETAG")
@@ -141,12 +141,13 @@ fn test_range_hyper_response() {
     assert_eq!(res.headers().get(header::ETAG), Some(&header::HeaderValue::from_static("ETAG")));
     assert_eq!(res.headers().get(header::CONTENT_LENGTH), Some(&header::HeaderValue::from_static("5")));
     assert_eq!(res.headers().get(header::CONTENT_RANGE), Some(&header::HeaderValue::from_static("bytes 4-8/10")));
-    assert_eq!(res.into_body().concat2().wait().unwrap().as_ref(), b"45678");
+    assert_eq!(to_bytes(res.into_body()).await.unwrap().as_ref(), b"45678");
 }
 
-#[test]
-fn test_bad_if_range_hyper_response() {
-    use {futures::Future, bytes::Bytes};
+#[tokio::test]
+async fn test_bad_if_range_hyper_response() {
+    use { bytes::Bytes, hyper::body::to_bytes };
+
     let req = Request::builder()
         .header(header::RANGE, "bytes=4-8")
         .header(header::IF_RANGE, "WRONG")
@@ -159,5 +160,5 @@ fn test_bad_if_range_hyper_response() {
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers().get(header::CONTENT_LENGTH), Some(&header::HeaderValue::from_static("10")));
     assert_eq!(res.headers().get(header::CONTENT_RANGE), None);
-    assert_eq!(res.into_body().concat2().wait().unwrap().as_ref(), b"0123456789");
+    assert_eq!(to_bytes(res.into_body()).await.unwrap().as_ref(), b"0123456789");
 }
