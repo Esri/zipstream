@@ -1,4 +1,4 @@
-FROM rust:1.43-alpine as build
+FROM rust:1.46-alpine as build
 
 # Build and cache dependencies
 RUN apk add --no-cache musl-dev openssl-dev pkgconf make unzip python3
