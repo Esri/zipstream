@@ -223,9 +223,18 @@ pub fn zip_stream(files: impl IntoIterator<Item = ZipEntry>, options: ZipOptions
 mod test {
     use super::*;
     use bytes::{Bytes};
-    use crate::stream_range::{ Range, StreamRange };
-    use tokio::stream::StreamExt;
+    use futures::Stream;
+    use crate::stream_range::{ Range, StreamRange,  };
+    use futures_util::StreamExt;
     use std::process::Command;
+
+    async fn concat<E>(mut stream: impl Stream<Item = Result<Bytes, E>> + Unpin) -> Result<Vec<u8>, E> {
+        let mut v = Vec::new();
+        while let Some(buf) = stream.next().await {
+            v.put(buf?);
+        }
+        Ok(v)
+    }
 
     fn test_entries() -> Vec<ZipEntry> {
         vec![
@@ -248,15 +257,15 @@ mod test {
     #[tokio::test]
     async fn test_concat() {
         let zip = zip_stream(test_entries(), ZipOptions::default());
-        let buf = zip.stream_range(Range { start: 0, end: zip.len() }).collect::<Result<Bytes, _>>().await.unwrap();
+        let buf = concat(zip.stream_range(Range { start: 0, end: zip.len() })).await.unwrap();
 
         assert_eq!(zip.len(), buf.len() as u64);
 
         for start in 0..zip.len() {
             for end in start..zip.len() {
                 println!("{} {}", start, end);
-                let slice = zip.stream_range(Range { start, end }).collect::<Result<Bytes, _>>().await.unwrap();
-                assert_eq!(buf.slice(start as usize..end as usize), slice, "{} {}", start, end);
+                let slice = concat(zip.stream_range(Range { start, end })).await.unwrap();
+                assert_eq!(buf[start as usize..end as usize], slice, "{} {}", start, end);
             }
         }
     }
@@ -266,7 +275,7 @@ mod test {
     async fn test_zip32() {
         let zip = zip_stream(test_entries(), ZipOptions { force_zip64: false });
 
-        let buf = zip.stream_range(Range { start: 0, end: zip.len() }).collect::<Result<Bytes, _>>().await.unwrap();
+        let buf = concat(zip.stream_range(Range { start: 0, end: zip.len() })).await.unwrap();
         std::fs::write("test.zip", &buf).unwrap();
 
         assert!(Command::new("zipinfo").arg("-v").arg("test.zip").status().unwrap().success());
@@ -279,7 +288,7 @@ mod test {
     async fn test_zip64() {
         let zip = zip_stream(test_entries(), ZipOptions { force_zip64: true });
 
-        let buf = zip.stream_range(Range { start: 0, end: zip.len() }).collect::<Result<Bytes, _>>().await.unwrap();
+        let buf = concat(zip.stream_range(Range { start: 0, end: zip.len() })).await.unwrap();
         std::fs::write("test64.zip", &buf).unwrap();
 
         assert!(Command::new("zipinfo").arg("-v").arg("test64.zip").status().unwrap().success());
