@@ -1,4 +1,4 @@
-FROM rust:1.43-alpine as build
+FROM rust:1.49.0-alpine@sha256:804a81b0723199259bafa0ab3423dc37c9cc5197b26042ecfab3ef80ce86f623 as build
 
 # Build and cache dependencies
 RUN apk add --no-cache musl-dev openssl-dev pkgconf make unzip python3
@@ -8,18 +8,18 @@ COPY Cargo.toml .
 COPY Cargo.lock .
 
 ENV RUSTFLAGS -C target-feature=-crt-static
-RUN cargo build --release
+RUN cargo build --locked --release
 
 # Build actual source
 COPY src/* /crate/src/
-RUN touch /crate/src/main.rs && cargo build --release
+RUN touch /crate/src/main.rs && cargo build --locked --release
 
 # Run tests
 FROM build as test
 RUN cargo test --release
 
 # Deployment image
-FROM alpine
+FROM alpine:3.12.3@sha256:074d3636ebda6dd446d0d00304c4454f468237fdacf08fb0eeac90bdbfa1bac7
 RUN apk add --no-cache libgcc
 COPY --from=build /crate/target/release/zipstream /usr/local/bin/
 USER guest

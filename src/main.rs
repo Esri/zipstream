@@ -13,12 +13,15 @@ mod upstream;
 mod s3url;
 
 use std::sync::Arc;
+use std::convert::Infallible;
 
-use futures::{ future, Future, Stream, future::Either };
 use clap::{Arg, App};
-use hyper::{ Client, Response, Server, StatusCode };
-use hyper::service::service_fn;
+use hyper::{ Client, Request, Response, Body, Server, StatusCode, client::HttpConnector };
+use hyper::service::{ make_service_fn, service_fn };
 use hyper_tls::HttpsConnector;
+
+type HyperClient = Client<HttpsConnector<HttpConnector>>;
+type S3Arc = Arc<dyn rusoto_s3::S3 + Send + Sync>;
 
 #[derive(Clone)]
 pub struct Config {
@@ -27,7 +30,8 @@ pub struct Config {
     via_zip_stream_header_value: String,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut logger = env_logger::Builder::from_default_env();
     logger.filter_level(log::LevelFilter::Info);
     logger.write_style(env_logger::WriteStyle::Never);
@@ -60,7 +64,7 @@ fn main() {
         .get_matches();
 
     let region = rusoto_core::Region::default();
-    let s3_client = Arc::new(rusoto_s3::S3Client::new(region)) as Arc<dyn rusoto_s3::S3 + Send + Sync>;
+    let s3_client = Arc::new(rusoto_s3::S3Client::new(region)) as S3Arc;
 
     let config = Config {
         upstream: matches.value_of("upstream").unwrap().into(),
@@ -68,47 +72,53 @@ fn main() {
         via_zip_stream_header_value: matches.value_of("header-value").unwrap().into(),
     };
 
-    let https = HttpsConnector::new(4).unwrap();
-    let client_main = Client::builder()
-        .build::<_, hyper::Body>(https);
+    let client = Client::builder().build::<_, hyper::Body>(HttpsConnector::new());
 
     let addr = matches.value_of("listen").unwrap().parse().expect("invalid `listen` value");
 
-    let new_svc = move || {
-        let client = client_main.clone();
+    let new_svc = make_service_fn(move |_conn| {
+        let client = client.clone();
         let s3_client = s3_client.clone();
         let config = config.clone();
 
-        service_fn(move |req|{
-            let s3_client = s3_client.clone();
-            log::info!("Request: {} {}", req.method(), req.uri());
+        async {
+            Ok::<_, Infallible>(service_fn(move |req| {
+                let client = client.clone();
+                let s3_client = s3_client.clone();
+                let config = config.clone();
 
-            future::result(upstream::request(&config, &req).map(|upstream_req| {
-                client.request(upstream_req).map_err(|e| {
-                    log::error!("Failed to connect upstream: {}", e);
-                    (StatusCode::SERVICE_UNAVAILABLE, "Upstream connection failed")
-                })
-            })).flatten().and_then(move |upstream_response| {
-                if upstream_response.headers().get("X-Zip-Stream").is_some() {
-                    Either::A(upstream_response.into_body().concat2().map_err(|e| {
-                        log::error!("Failed to read upstream body: {}", e);
-                        (StatusCode::SERVICE_UNAVAILABLE, "Upstream request failed")
-                    }).and_then(move |body| {
-                        upstream::response(&s3_client, &req, &body[..])
-                    }))
-                } else {
-                    log::info!("Request proxied from upstream");
-                    Either::B(future::ok(upstream_response))
+                async move {
+                    Ok::<_, Infallible>(match handle_request(req, &client, &s3_client, &config).await {
+                        Ok(response) => response,
+                        Err((status, message)) => Response::builder().status(status).body(message.into()).unwrap(),
+                    })
                 }
-            }).or_else(|(status, message)| {
-                future::ok::<_, hyper::Error>(Response::builder().status(status).body(message.into()).unwrap())
-            })
-        })
-    };
+            }))
+        }
+    });
 
-    let server = Server::bind(&addr)
-        .serve(new_svc)
-        .map_err(|e| log::error!("server error: {}", e));
+    Server::bind(&addr).serve(new_svc).await?;
 
-    hyper::rt::run(server);
+    Ok(())
+}
+
+async fn handle_request(req: Request<Body>, client: &HyperClient, s3_client: &S3Arc, config: &Config) -> Result<Response<Body>, (StatusCode, &'static str)> {
+    log::info!("Request: {} {}", req.method(), req.uri());
+    let upstream_req = upstream::request(&config, &req)?;
+    let upstream_res = client.request(upstream_req).await.map_err(|e| {
+        log::error!("Failed to connect upstream: {}", e);
+        (StatusCode::SERVICE_UNAVAILABLE, "Upstream connection failed")
+    })?;
+
+    if upstream_res.headers().get("X-Zip-Stream").is_some() {
+        let body = hyper::body::to_bytes(upstream_res.into_body()).await.map_err(|e| {
+            log::error!("Failed to read upstream body: {}", e);
+            (StatusCode::SERVICE_UNAVAILABLE, "Upstream request failed")
+        })?;
+
+        upstream::response(s3_client, &req, &body[..])
+    } else {
+        log::info!("Request proxied from upstream");
+        Ok(upstream_res)
+    }
 }

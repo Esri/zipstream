@@ -1,10 +1,11 @@
 // © 2019 3D Robotics. License: Apache-2.0
 use std::sync::Arc;
-use futures::{Future, stream, Stream};
+use std::pin::Pin;
+use futures::{ future, TryFutureExt, stream, Stream, StreamExt, TryStreamExt };
 use bytes::Bytes;
-use rusoto_s3::{ S3, GetObjectRequest, GetObjectError };
+use rusoto_s3::{ S3, GetObjectRequest };
 
-type BoxBytesStream = Box<dyn Stream<Item=Bytes, Error=BoxError> + Send>;
+type BoxBytesStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send +'static>>;
 type BoxError = Box<dyn std::error::Error + 'static + Sync + Send>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -42,13 +43,13 @@ pub trait StreamRange {
 impl StreamRange for Bytes {
     fn len(&self) -> u64 { Bytes::len(self) as u64 }
     fn stream_range(&self, range: Range) -> BoxBytesStream {
-        Box::new(stream::once(Ok(self.slice(range.start as usize, range.end as usize))))
+        Box::pin(stream::once(future::ok(self.slice(range.start as usize..range.end as usize))))
     }
 }
 
 /// Implements `StreamRange` to serve an object from an S3 bucket
 pub struct S3Object {
-    pub s3: Arc<dyn S3>,
+    pub s3: Arc<dyn S3 + Send + Sync>,
     pub bucket: String,
     pub key: String,
     pub len: u64,
@@ -57,35 +58,36 @@ pub struct S3Object {
 impl StreamRange for S3Object {
     fn len(&self) -> u64 { self.len }
     fn stream_range(&self, range: Range) -> BoxBytesStream {
-        let req = GetObjectRequest { 
-            bucket: self.bucket.clone(),
-            key: self.key.clone(),
-            range: Some(range.to_http_range_header()),
-            ..GetObjectRequest::default()
+        let s3 = self.s3.clone();
+        let bucket = self.bucket.clone();
+        let key = self.key.clone();
+
+        let stream = async move {
+            let len = range.len();
+            let url = format!("s3://{}/{}", bucket, key);
+
+            let req = GetObjectRequest {
+                bucket,
+                key,
+                range: Some(range.to_http_range_header()),
+                ..GetObjectRequest::default()
+            };
+
+            let res = s3.get_object(req).await
+                .map_err(|err| { format!("S3 GetObject failed with {}", err) })?;
+            
+            log::info!("S3 get complete for {}", url);
+
+            if res.content_length != Some(len as i64) {
+                log::error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
+            }
+
+            Ok(res.body.unwrap().map_err(|err| {
+                format!("S3 stream failed with {}", err).into()
+            }))
         };
 
-        let len = range.len();
-        let url = format!("s3://{}/{}", self.bucket, self.key);
-
-        Box::new(self.s3.get_object(req)
-            .map_err(|err| {
-                match &err {
-                    GetObjectError::Unknown(resp) => format!("S3 GetObject failed with {} {}", resp.status, String::from_utf8_lossy(&resp.body[..])),
-                    err => format!("S3 GetObject failed with {}", err),
-                }.into()
-            })
-            .map(move |res| {
-                log::info!("S3 get complete for {}", url);
-
-                if res.content_length != Some(len as i64) {
-                    log::error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
-                }
-
-                res.body.unwrap().map(Bytes::from).map_err(|err| {
-                    format!("S3 stream failed with {}", err).into()
-                })
-            })
-            .flatten_stream())
+        Box::pin(stream.try_flatten_stream())
     }
 }
 
@@ -103,6 +105,6 @@ impl StreamRange for Concatenated {
                 streams.push(part.stream_range(inner_range));
             }
         }
-        Box::new(stream::iter_ok::<_, BoxError>(streams.into_iter()).flatten())
+        Box::pin(stream::iter(streams.into_iter()).flatten())
     }
 }
