@@ -1,8 +1,7 @@
 // © 2019 3D Robotics. License: Apache-2.0
 use std::sync::Arc;
 use std::pin::Pin;
-use futures::{ future, stream, Stream };
-use futures_util::{future::TryFutureExt, stream::StreamExt, stream::TryStreamExt};
+use futures::{ future, TryFutureExt, stream, Stream, StreamExt, TryStreamExt };
 use bytes::Bytes;
 use rusoto_s3::{ S3, GetObjectRequest };
 

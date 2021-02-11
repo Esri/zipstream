@@ -223,9 +223,8 @@ pub fn zip_stream(files: impl IntoIterator<Item = ZipEntry>, options: ZipOptions
 mod test {
     use super::*;
     use bytes::{Bytes};
-    use futures::Stream;
+    use futures::{ Stream, StreamExt };
     use crate::stream_range::{ Range, StreamRange,  };
-    use futures_util::StreamExt;
     use std::process::Command;
 
     async fn concat<E>(mut stream: impl Stream<Item = Result<Bytes, E>> + Unpin) -> Result<Vec<u8>, E> {

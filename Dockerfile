@@ -8,11 +8,11 @@ COPY Cargo.toml .
 COPY Cargo.lock .
 
 ENV RUSTFLAGS -C target-feature=-crt-static
-RUN cargo build --release
+RUN cargo build --locked --release
 
 # Build actual source
 COPY src/* /crate/src/
-RUN touch /crate/src/main.rs && cargo build --release
+RUN touch /crate/src/main.rs && cargo build --locked --release
 
 # Run tests
 FROM build as test

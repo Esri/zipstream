@@ -1,6 +1,6 @@
 // © 2019 3D Robotics. License: Apache-2.0
 
-use futures_util::stream::TryStreamExt;
+use futures::stream::TryStreamExt;
 use hyper::{Request, Response, Body, StatusCode, header};
 use crate::stream_range::{ Range, StreamRange };
 
