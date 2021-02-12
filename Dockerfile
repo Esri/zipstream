@@ -1,4 +1,4 @@
-FROM rust:1.49.0-alpine@sha256:804a81b0723199259bafa0ab3423dc37c9cc5197b26042ecfab3ef80ce86f623 as build
+FROM rust:1.50.0-alpine@sha256:5280ec3be86b0b81da654e7c019ab3ec10a7e7e8556dfe5e02bdf2276d11be04 as build
 
 # Build and cache dependencies
 RUN apk add --no-cache musl-dev openssl-dev pkgconf make unzip python3
