@@ -5,15 +5,27 @@ authors = ["Kevin Mehall <kevin.mehall@3drobotics.com>"]
 license = "Apache-2.0"
 edition = "2018"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[[bin]]
+name = "download"
+path = "src/bin/download.rs"
+
 [dependencies]
 futures = "0.3.4"
 bytes = "1.0"
 regex = "1.0.5"
-tokio = { version = "1.0", features = [] }
+tokio = { version = "1.0", features = ["fs"] }
 hyper = { version = "0.14", features = ["server", "stream"] }
 hyper-tls = "0.5"
 rusoto_s3 = "0.46"
 rusoto_core = "0.46"
+rusoto_credential = "0.46"
 serde_json = "1.0"
 serde = "1.0"
 serde_derive = "1.0"
@@ -25,3 +37,4 @@ lazy_static = "1.1.0"
 chrono = { version = "0.4", features = ["serde"] }
 jemallocator = "0.3.0"
 jemalloc-sys = { version = "0.3.0", features = ["background_threads"] }
+anyhow = "1.0"

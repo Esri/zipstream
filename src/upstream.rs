@@ -14,18 +14,18 @@ use std::hash::{ Hash, Hasher };
 use chrono::{DateTime, Utc};
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct ZipFileDescription {
-    archive_name: String,
-    source: S3Url,
-    length: u64,
-    crc: u32,
-    last_modified: DateTime<Utc>,
+pub struct ZipFileDescription {
+    pub archive_name: String,
+    pub source: S3Url,
+    pub length: u64,
+    pub crc: u32,
+    pub last_modified: DateTime<Utc>,
 }
 
 #[derive(Deserialize, Clone, Debug, Hash)]
-struct UpstreamResponse {
-    filename: String,
-    entries: Vec<ZipFileDescription>,
+pub struct UpstreamResponse {
+    pub filename: String,
+    pub entries: Vec<ZipFileDescription>,
 }
 
 static KEEP_HEADERS: &[header::HeaderName] = &[

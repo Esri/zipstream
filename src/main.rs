@@ -6,11 +6,14 @@ use log;
 use env_logger;
 use log_panics;
 
-mod stream_range;
-mod serve_range;
-mod zip;
-mod upstream;
-mod s3url;
+use zipstream::{
+    stream_range,
+    serve_range,
+    zip,
+    upstream,
+    s3url,
+    Config
+};
 
 use std::sync::Arc;
 use std::convert::Infallible;
@@ -22,13 +25,6 @@ use hyper_tls::HttpsConnector;
 
 type HyperClient = Client<HttpsConnector<HttpConnector>>;
 type S3Arc = Arc<dyn rusoto_s3::S3 + Send + Sync>;
-
-#[derive(Clone)]
-pub struct Config {
-    upstream: String,
-    strip_prefix: String,
-    via_zip_stream_header_value: String,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
