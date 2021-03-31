@@ -1,5 +1,6 @@
 use std::{env, sync::Arc};
 use anyhow::{Context, Error, anyhow};
+use chrono::{DateTime, Utc};
 use clap::{Arg, App, SubCommand};
 use rusoto_core::{HttpClient};
 use rusoto_s3::{S3, S3Client, GetObjectRequest};
@@ -9,9 +10,21 @@ use tokio::fs::File;
 use futures::stream::StreamExt;
 
 use zipstream::s3url::S3Url;
-use zipstream::upstream::UpstreamResponse;
 use zipstream::stream_range::{StreamRange, S3Object, Range};
 use zipstream::zip::{ZipEntry, zip_stream, ZipOptions};
+#[derive(serde::Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ManifestEntry {
+    pub archive_name: String,
+    pub source: String,
+    pub length: u64,
+    pub crc: u32,
+    pub last_modified: DateTime<Utc>,
+}
+
+#[derive(serde::Deserialize, Clone, Debug, Hash)]
+pub struct Manifest {
+    pub entries: Vec<ManifestEntry>,
+}
 
 #[tokio::main]
 async fn main() {
@@ -37,8 +50,10 @@ async fn main() {
                           .get_matches();
 
     let manifest_s3url = matches.value_of("manifest_path").unwrap().parse::<S3Url>().unwrap();
+    let s3_root_key = &manifest_s3url.key[..manifest_s3url.key.rfind("/").unwrap_or(0)];
+
     let manifest_json = s3_download(&*s3_client, &manifest_s3url).await.unwrap();     
-    let mut manifest: UpstreamResponse = serde_json::from_slice(&manifest_json).unwrap();
+    let mut manifest: Manifest = serde_json::from_slice(&manifest_json).unwrap();
 
     manifest.entries.sort();
     
@@ -48,8 +63,8 @@ async fn main() {
             crc: file.crc,
             data: Box::new(S3Object { 
                 s3: s3_client.clone(),
-                bucket: file.source.bucket,
-                key: file.source.key,
+                bucket: manifest_s3url.bucket.clone(),
+                key: format!("{root}/{path}", root = s3_root_key, path = file.source),
                 len: file.length
             }),
             last_modified: file.last_modified,
@@ -74,7 +89,7 @@ async fn main() {
         let chunk = chunk_res.unwrap();
         file.write_all(&chunk).await.unwrap();
         completed += chunk.len();
-        eprintln!("\r{} / {}", completed, length);
+        eprint!("{} / {}\r", completed, length);
     }
 }
 
