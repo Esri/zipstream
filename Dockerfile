@@ -19,7 +19,7 @@ FROM build as test
 RUN cargo test --release
 
 # Deployment image
-FROM alpine:3.13.3@sha256:826f70e0ac33e99a72cf20fb0571245a8fee52d68cb26d8bc58e53bfa65dcdfa
+FROM alpine:3.13.4@sha256:ec14c7992a97fc11425907e908340c6c3d6ff602f5f13d899e6b7027c9b4133a
 RUN apk add --no-cache libgcc
 COPY --from=build /crate/target/release/zipstream /usr/local/bin/
 USER guest
