@@ -1,4 +1,6 @@
-FROM rust:1.51.0-alpine@sha256:be03a93969087b1c610db2919b16a249fd38dc8942175ad811a221450ae356df as build
+FROM rust:1.51.0-alpine@sha256:a84599229afe057f68257e357bcd22d3c994b12b537b6f8e8e09852a29e6f785 as base
+
+FROM base as build
 
 # Build and cache dependencies
 RUN apk add --no-cache musl-dev openssl-dev pkgconf make unzip python3
@@ -18,10 +20,27 @@ RUN touch /crate/src/main.rs && cargo build --locked --release
 FROM build as test
 RUN cargo test --release
 
+# Use APK to assemble a root filesystem with very select dependencies,
+# not even busybox or apk (basically a custom "distroless")
+FROM base as chroot
+RUN apk add --no-cache --root /chroot --initdb \
+            --keys-dir /etc/apk/keys --repositories-file /etc/apk/repositories \
+            libgcc openssl
+# ca-certificates package pulls in busybox, so just copy the output
+RUN cp /etc/ssl/certs/ca-certificates.crt /chroot/etc/ssl/certs/ca-certificates.crt
+
 # Deployment image
+<<<<<<< HEAD
 FROM alpine:3.13.4@sha256:ec14c7992a97fc11425907e908340c6c3d6ff602f5f13d899e6b7027c9b4133a
 RUN apk add --no-cache libgcc
+||||||| parent of decace6 (docker: use apk to build a custom "distroless" root fs for the image)
+FROM alpine:3.13.3@sha256:826f70e0ac33e99a72cf20fb0571245a8fee52d68cb26d8bc58e53bfa65dcdfa
+RUN apk add --no-cache libgcc
+=======
+FROM scratch
+COPY --from=chroot /chroot /
+>>>>>>> decace6 (docker: use apk to build a custom "distroless" root fs for the image)
 COPY --from=build /crate/target/release/zipstream /usr/local/bin/
-USER guest
+USER 2000
 CMD ["zipstream"]
 EXPOSE 3000
