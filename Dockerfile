@@ -27,7 +27,7 @@ RUN apk add --no-cache --root /chroot --initdb \
             --keys-dir /etc/apk/keys --repositories-file /etc/apk/repositories \
             libgcc openssl
 # ca-certificates package pulls in busybox, so just copy the output
-RUN cp /etc/ssl/certs/ca-certificates.crt /chroot/etc/ssl/certs/ca-certificates.crt
+RUN mkdir -p /chroot/etc/ssl/certs/ && cp /etc/ssl/certs/ca-certificates.crt /chroot/etc/ssl/certs/ca-certificates.crt
 
 # Deployment image
 FROM scratch
