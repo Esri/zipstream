@@ -1,4 +1,4 @@
-FROM rust:1.56.1-alpine@sha256:a1dd0a7472c74d0dd5bd69fa131357c55fd633710ee122140e9f164dac87a359 as base
+FROM rust:1.58.0-alpine@sha256:c6681a28d4117d3e13b1be9d38afddb45a7f751c9f7457fa43630a144984039f as base
 
 FROM base as build
 
@@ -27,7 +27,7 @@ RUN apk add --no-cache --root /chroot --initdb \
             --keys-dir /etc/apk/keys --repositories-file /etc/apk/repositories \
             libgcc openssl
 # ca-certificates package pulls in busybox, so just copy the output
-RUN cp /etc/ssl/certs/ca-certificates.crt /chroot/etc/ssl/certs/ca-certificates.crt
+RUN mkdir -p /chroot/etc/ssl/certs/ && cp /etc/ssl/certs/ca-certificates.crt /chroot/etc/ssl/certs/ca-certificates.crt
 
 # Deployment image
 FROM scratch
