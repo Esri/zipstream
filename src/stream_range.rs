@@ -1,9 +1,8 @@
 // © 2019 3D Robotics. License: Apache-2.0
-use std::sync::Arc;
+use aws_sdk_s3 as s3;
 use std::pin::Pin;
 use futures::{ future, TryFutureExt, stream, Stream, StreamExt, TryStreamExt };
 use bytes::Bytes;
-use rusoto_s3::{ S3, GetObjectRequest };
 
 type BoxBytesStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send +'static>>;
 type BoxError = Box<dyn std::error::Error + 'static + Sync + Send>;
@@ -49,7 +48,7 @@ impl StreamRange for Bytes {
 
 /// Implements `StreamRange` to serve an object from an S3 bucket
 pub struct S3Object {
-    pub s3: Arc<dyn S3 + Send + Sync>,
+    pub client: s3::Client,
     pub bucket: String,
     pub key: String,
     pub len: u64,
@@ -58,7 +57,7 @@ pub struct S3Object {
 impl StreamRange for S3Object {
     fn len(&self) -> u64 { self.len }
     fn stream_range(&self, range: Range) -> BoxBytesStream {
-        let s3 = self.s3.clone();
+        let client = self.client.clone();
         let bucket = self.bucket.clone();
         let key = self.key.clone();
 
@@ -66,23 +65,21 @@ impl StreamRange for S3Object {
             let len = range.len();
             let url = format!("s3://{}/{}", bucket, key);
 
-            let req = GetObjectRequest {
-                bucket,
-                key,
-                range: Some(range.to_http_range_header()),
-                ..GetObjectRequest::default()
-            };
+            let req = client.get_object()
+                .bucket(bucket)
+                .key(key)
+                .range(range.to_http_range_header());
 
-            let res = s3.get_object(req).await
+            let res = req.send().await
                 .map_err(|err| { format!("S3 GetObject failed with {}", err) })?;
             
             log::info!("S3 get complete for {}", url);
 
-            if res.content_length != Some(len as i64) {
+            if res.content_length != (len as i64) {
                 log::error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
             }
 
-            Ok(res.body.unwrap().map_err(|err| {
+            Ok(res.body.map_err(|err| {
                 format!("S3 stream failed with {}", err).into()
             }))
         };

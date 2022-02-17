@@ -19,16 +19,16 @@ pub fn parse_range(range_val: &str, total_len: u64) -> Result<Option<Range>, &'s
         return Ok(None); // multiple ranges unsupported, but it's legal to just ignore the header
     }
 
-    if range_val.starts_with("-") {
-        let s = range_val[1..].parse::<u64>().map_err(|_| "invalid range number")?;
+    if let Some(range_end) = range_val.strip_prefix('-'){
+        let s = range_end.parse::<u64>().map_err(|_| "invalid range number")?;
         
         if s >= total_len {
             return Ok(None);
         }
 
         Ok(Some(Range { start: total_len-s, end: total_len }))
-    } else if range_val.ends_with("-") {
-        let s = range_val[..range_val.len()-1].parse::<u64>().map_err(|_| "invalid range number")?;
+    } else if let Some(range_start) = range_val.strip_suffix('-') {
+        let s = range_start.parse::<u64>().map_err(|_| "invalid range number")?;
         
         if s >= total_len {
             return Ok(None);
