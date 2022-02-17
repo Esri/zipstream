@@ -25,7 +25,7 @@ impl Range {
 
     pub fn len(&self) -> u64 { self.end - self.start }
 
-    pub fn to_http_range_header(&self) -> String {
+    pub fn to_http_range_header(self) -> String {
         format!("bytes={}-{}", self.start, self.end-1)
     }
 }

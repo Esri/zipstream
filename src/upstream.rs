@@ -8,7 +8,6 @@ use crate::s3url::S3Url;
 use aws_sdk_s3 as s3;
 use hyper::{header, Body, Request, Response, Uri, Method, StatusCode};
 use serde_derive::Deserialize;
-use log;
 use std::hash::{ Hash, Hasher };
 use chrono::{DateTime, Utc};
 
@@ -95,6 +94,6 @@ pub fn response(client: s3::Client, req: &Request<Body>, response_body: &[u8]) -
 
     log::info!("Streaming zip file {}: {} entries, {} bytes", res.filename, num_entries, stream.len());
 
-    Ok(hyper_response(&req, "application/zip", &etag, &res.filename, &stream))
+    Ok(hyper_response(req, "application/zip", &etag, &res.filename, &stream))
 }
 

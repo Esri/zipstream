@@ -15,11 +15,11 @@ pub fn parse_range(range_val: &str, total_len: u64) -> Result<Option<Range>, &'s
 
     let range_val = &range_val["bytes=".len()..].trim();
 
-    if range_val.contains(",") {
+    if range_val.contains(',') {
         return Ok(None); // multiple ranges unsupported, but it's legal to just ignore the header
     }
 
-    if let Some(range_end) = range_val.strip_prefix('-'){
+    if let Some(range_end) = range_val.strip_prefix('-') {
         let s = range_end.parse::<u64>().map_err(|_| "invalid range number")?;
         
         if s >= total_len {
@@ -35,7 +35,7 @@ pub fn parse_range(range_val: &str, total_len: u64) -> Result<Option<Range>, &'s
         }
 
         Ok(Some(Range { start: s, end: total_len}))
-    } else if let Some(h) = range_val.find("-") {
+    } else if let Some(h) = range_val.find('-') {
         let s = range_val[..h].parse::<u64>().map_err(|_| "invalid range number")?;
         let e = range_val[h+1..].parse::<u64>().map_err(|_| "invalid range number")?;
 
@@ -45,7 +45,7 @@ pub fn parse_range(range_val: &str, total_len: u64) -> Result<Option<Range>, &'s
 
         Ok(Some(Range { start: s, end: e+1 }))
     } else {
-        return Err("invalid range");
+        Err("invalid range")
     }
 }
 

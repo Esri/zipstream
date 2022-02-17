@@ -1,10 +1,6 @@
 // © 2019 3D Robotics. License: Apache-2.0
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3 as s3;
-use hyper;
-use log;
-use env_logger;
-use log_panics;
 
 mod stream_range;
 mod serve_range;
