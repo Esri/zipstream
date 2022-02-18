@@ -27,7 +27,7 @@ pub struct Config {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut logger = env_logger::Builder::from_default_env();
-    logger.filter_level(log::LevelFilter::Info);
+    logger.filter_module("zipstream", log::LevelFilter::Info);
     logger.write_style(env_logger::WriteStyle::Never);
     logger.init();
     log_panics::init();
