@@ -5,11 +5,9 @@ use crate::serve_range::hyper_response;
 use crate::zip::{ ZipEntry, ZipOptions, zip_stream };
 use crate::s3url::S3Url;
 
-use std::sync::Arc;
+use aws_sdk_s3 as s3;
 use hyper::{header, Body, Request, Response, Uri, Method, StatusCode};
 use serde_derive::Deserialize;
-use rusoto_s3::S3;
-use log;
 use std::hash::{ Hash, Hasher };
 use chrono::{DateTime, Utc};
 
@@ -61,7 +59,7 @@ pub fn request(config: &Config, req: &Request<Body>) -> Result<Request<Body>, (S
 }
 
 /// Parse an upstream JSON response and produce a streaming zip file response
-pub fn response(s3: &Arc<dyn S3 + Send + Sync>, req: &Request<Body>, response_body: &[u8]) -> Result<Response<Body>, (StatusCode, &'static str)> {
+pub fn response(client: s3::Client, req: &Request<Body>, response_body: &[u8]) -> Result<Response<Body>, (StatusCode, &'static str)> {
     let mut res: UpstreamResponse = serde_json::from_slice(response_body).map_err(|e| {
         log::error!("Invalid upstream response JSON: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse upstream request")
@@ -81,7 +79,7 @@ pub fn response(s3: &Arc<dyn S3 + Send + Sync>, req: &Request<Body>, response_bo
             archive_path: file.archive_name,
             crc: file.crc,
             data: Box::new(S3Object { 
-                s3: s3.clone(),
+                client: client.clone(),
                 bucket: file.source.bucket,
                 key: file.source.key,
                 len: file.length
@@ -96,6 +94,6 @@ pub fn response(s3: &Arc<dyn S3 + Send + Sync>, req: &Request<Body>, response_bo
 
     log::info!("Streaming zip file {}: {} entries, {} bytes", res.filename, num_entries, stream.len());
 
-    Ok(hyper_response(&req, "application/zip", &etag, &res.filename, &stream))
+    Ok(hyper_response(req, "application/zip", &etag, &res.filename, &stream))
 }
 
