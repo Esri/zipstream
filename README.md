@@ -29,7 +29,7 @@ Incoming requests are proxied to the upstream server. If the response from the u
 
 The manifest is JSON in the following format:
 
-```
+```json
 {
   "filename": "test.zip", // The download filename returned in a Content-disposition: attachment header
   "entries": [
@@ -43,4 +43,27 @@ The manifest is JSON in the following format:
     ...
   ]
 }
+```
+
+### Demo
+
+```console
+$ cargo run --example demo-server & # a stand-in for your application
+
+$ export AWS_REGION=us-east-1
+$ export AWS_ACCESS_KEY_ID=...
+$ export AWS_SECRET_ACCESS_KEY=...
+$ cargo run -- --listen 127.0.0.1:3000 --upstream http://localhost:3001 &
+
+$ curl http://localhost:3000/foo/bar/test.zip -o test.zip
+Demo server got a request for /foo/bar/test.zip
+[2022-09-29T22:22:09Z INFO  zipstream::upstream] Streaming zip file test.zip: 2 entries, 258 bytes
+[2022-09-29T22:22:10Z INFO  zipstream::stream_range] S3 get complete for s3://sitescan-test/zipstream-demo/test1.txt
+[2022-09-29T22:22:10Z INFO  zipstream::stream_range] S3 get complete for s3://sitescan-test/zipstream-demo/test2.txt
+
+$ unzip -t test.zip
+Archive:  test.zip
+    testing: test1.txt                OK
+    testing: test2.txt                OK
+No errors detected in compressed data of test.zip.
 ```
