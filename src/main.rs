@@ -2,11 +2,10 @@
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3 as s3;
 
-mod stream_range;
-mod serve_range;
-mod zip;
-mod upstream;
-mod s3url;
+use zipstream::{
+    upstream,
+    Config
+};
 
 use std::convert::Infallible;
 
@@ -16,13 +15,6 @@ use hyper::service::{ make_service_fn, service_fn };
 use hyper_tls::HttpsConnector;
 
 type HyperClient = Client<HttpsConnector<HttpConnector>>;
-
-#[derive(Clone)]
-pub struct Config {
-    upstream: String,
-    strip_prefix: String,
-    via_zip_stream_header_value: String,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
