@@ -14,6 +14,9 @@ use hyper::{ Client, Request, Response, Body, Server, StatusCode, client::HttpCo
 use hyper::service::{ make_service_fn, service_fn };
 use hyper_tls::HttpsConnector;
 
+#[global_allocator]
+static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 type HyperClient = Client<HttpsConnector<HttpConnector>>;
 
 #[tokio::main]
