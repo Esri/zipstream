@@ -6,6 +6,7 @@ use crate::zip::{ ZipEntry, ZipOptions, zip_stream };
 use crate::s3url::S3Url;
 
 use aws_sdk_s3 as s3;
+use bytes::Bytes;
 use hyper::{header, Body, Request, Response, Uri, Method, StatusCode};
 use serde_derive::Deserialize;
 use std::hash::{ Hash, Hasher };
@@ -59,11 +60,13 @@ pub fn request(config: &Config, req: &Request<Body>) -> Result<Request<Body>, (S
 }
 
 /// Parse an upstream JSON response and produce a streaming zip file response
-pub fn response(client: s3::Client, req: &Request<Body>, response_body: &[u8]) -> Result<Response<Body>, (StatusCode, &'static str)> {
-    let mut res: UpstreamResponse = serde_json::from_slice(response_body).map_err(|e| {
+pub fn response(client: s3::Client, req: &Request<Body>, response_body: Bytes) -> Result<Response<Body>, (StatusCode, &'static str)> {
+    let mut res: UpstreamResponse = serde_json::from_slice(&response_body[..]).map_err(|e| {
         log::error!("Invalid upstream response JSON: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse upstream request")
     })?;
+    
+    drop(response_body);
 
     res.entries.sort();
 

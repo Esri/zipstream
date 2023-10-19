@@ -106,7 +106,7 @@ async fn handle_request(req: Request<Body>, client: &HyperClient, s3_client: s3:
             (StatusCode::SERVICE_UNAVAILABLE, "Upstream request failed")
         })?;
 
-        upstream::response(s3_client, &req, &body[..])
+        upstream::response(s3_client, &req, body)
     } else {
         log::info!("Request proxied from upstream");
         Ok(upstream_res)
