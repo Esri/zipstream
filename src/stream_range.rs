@@ -1,7 +1,7 @@
 // © 2019 3D Robotics. License: Apache-2.0
 use aws_sdk_s3 as s3;
 use std::pin::Pin;
-use futures::{ future, TryFutureExt, stream, Stream, StreamExt, TryStreamExt };
+use futures::{ future::{self, lazy}, FutureExt, TryFutureExt, stream, Stream, StreamExt, TryStreamExt };
 use bytes::Bytes;
 
 type BoxBytesStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send +'static>>;
@@ -61,30 +61,32 @@ impl StreamRange for S3Object {
         let bucket = self.bucket.clone();
         let key = self.key.clone();
 
-        let stream = async move {
-            let len = range.len();
-            let url = format!("s3://{}/{}", bucket, key);
+        // The inner `Future` that makes the S3 request is large, so
+        // lazily allocate it only when we begin streaming the specific file.
+        Box::pin(lazy(move |_| {
+            Box::pin(async move {
+                let len = range.len();
+                let url = format!("s3://{}/{}", bucket, key);
 
-            let req = client.get_object()
-                .bucket(bucket)
-                .key(key)
-                .range(range.to_http_range_header());
+                let req = client.get_object()
+                    .bucket(bucket)
+                    .key(key)
+                    .range(range.to_http_range_header());
 
-            let res = req.send().await
-                .map_err(|err| { format!("S3 GetObject failed with {}", err) })?;
-            
-            log::info!("S3 get complete for {}", url);
+                let res = req.send().await
+                    .map_err(|err| { format!("S3 GetObject failed with {}", err) })?;
 
-            if res.content_length != (len as i64) {
-                log::error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
-            }
+                log::info!("S3 get complete for {}", url);
 
-            Ok(res.body.map_err(|err| {
-                format!("S3 stream failed with {}", err).into()
-            }))
-        };
+                if res.content_length != (len as i64) {
+                    log::error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
+                }
 
-        Box::pin(stream.try_flatten_stream())
+                Ok(res.body.map_err(|err| {
+                    format!("S3 stream failed with {}", err).into()
+                }))
+            })
+        }).flatten().try_flatten_stream())
     }
 }
 
