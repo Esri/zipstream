@@ -1,7 +1,8 @@
 // © 2019 3D Robotics. License: Apache-2.0
 use aws_sdk_s3 as s3;
-use std::pin::Pin;
-use futures::{ future::{self, lazy}, FutureExt, TryFutureExt, stream, Stream, StreamExt, TryStreamExt };
+use s3::primitives::ByteStream;
+use std::{pin::Pin, task::{Context, Poll}};
+use futures::{ future::{self, lazy}, FutureExt, TryFutureExt, stream, Stream, StreamExt };
 use bytes::Bytes;
 
 pub type BoxBytesStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send +'static>>;
@@ -78,15 +79,26 @@ impl StreamRange for S3Object {
 
                 log::info!("S3 get complete for {}", url);
 
-                if res.content_length != (len as i64) {
+                if res.content_length != Some(len as i64) {
                     log::error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
                 }
 
-                Ok(res.body.map_err(|err| {
-                    format!("S3 stream failed with {}", err).into()
-                }))
+                Ok(ByteStreamWrap(res.body))
             })
         }).flatten().try_flatten_stream())
+    }
+}
+
+/// Newtype wrapper implementing [`Stream`] for [`ByteStream`].
+///
+/// https://github.com/smithy-lang/smithy-rs/pull/2983 removed the `Stream` implementation.
+pub struct ByteStreamWrap(ByteStream);
+
+impl Stream for ByteStreamWrap {
+    type Item = Result<Bytes, BoxError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.0).poll_next(cx).map_err(|e| e.into())
     }
 }
 

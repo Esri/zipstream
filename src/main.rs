@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .get_matches();
 
     let region_provider = RegionProviderChain::default_provider();
-    let s3_config = aws_config::from_env().region(region_provider).load().await;
+    let s3_config = aws_config::defaults(aws_config::BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
     let s3_client = s3::Client::new(&s3_config);
 
     let config = Config {
