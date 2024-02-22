@@ -4,8 +4,8 @@ use std::pin::Pin;
 use futures::{ future::{self, lazy}, FutureExt, TryFutureExt, stream, Stream, StreamExt, TryStreamExt };
 use bytes::Bytes;
 
-type BoxBytesStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send +'static>>;
-type BoxError = Box<dyn std::error::Error + 'static + Sync + Send>;
+pub type BoxBytesStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send +'static>>;
+pub type BoxError = Box<dyn std::error::Error + 'static + Sync + Send>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Range {
