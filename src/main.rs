@@ -15,7 +15,7 @@ use zipstream::{
 
 use std::net::SocketAddr;
 
-use clap::{Arg, App};
+use clap::Parser;
 use hyper::{ Request, Response, StatusCode, body::{self, Body} };
 use hyper::service::service_fn;
 use hyper_tls::HttpsConnector;
@@ -24,6 +24,27 @@ use hyper_tls::HttpsConnector;
 static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 type HyperClient = hyper_util::client::legacy::Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, http_body_util::Empty<Bytes>>;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Upstream server that provides zip file manifests
+    #[arg(long, value_name="URL")]
+    upstream: String,
+
+    /// Remove a prefix from the URL path before proxying to upstream server
+    #[arg(long, value_name="PREFIX", default_value="")]
+    pub strip_prefix: String,
+
+    /// Value passed in the X-Via-Zip-Stream header on the request to the upstream server
+    #[arg(long, value_name="VAL", default_value="true")]
+    pub header_value: String,
+
+    /// IP:port to listen for HTTP connections
+    #[arg(long, value_name="IP:PORT", default_value="[::1]:3000")]
+    pub listen: SocketAddr,
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -34,45 +55,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log_panics::init();
     log::info!("Startup");
 
-    let matches = App::new("zipstream")
-        .arg(Arg::with_name("upstream")
-            .long("upstream")
-            .takes_value(true)
-            .help("Upstream server that provides zip file manifests")
-            .value_name("URL")
-            .required(true))
-        .arg(Arg::with_name("strip-prefix")
-            .long("strip-prefix")
-            .takes_value(true)
-            .help("Remove a prefix from the URL path before proxying to upstream server")
-            .default_value(""))
-        .arg(Arg::with_name("header-value")
-            .long("header-value")
-            .takes_value(true)
-            .help("Value passed in the X-Via-Zip-Stream header on the request to the upstream server")
-            .default_value("true"))
-        .arg(Arg::with_name("listen")
-            .long("listen")
-            .takes_value(true)
-            .help("IP:port to listen for HTTP connections")
-            .default_value("127.0.0.1:3000"))
-        .get_matches();
+    let args = Args::parse();
 
     let region_provider = RegionProviderChain::default_provider();
     let s3_config = aws_config::defaults(aws_config::BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
     let s3_client = s3::Client::new(&s3_config);
 
     let config = Config {
-        upstream: matches.value_of("upstream").unwrap().into(),
-        strip_prefix:matches.value_of("strip-prefix").unwrap().into(),
-        via_zip_stream_header_value: matches.value_of("header-value").unwrap().into(),
+        upstream: args.upstream,
+        strip_prefix: args.strip_prefix,
+        via_zip_stream_header_value: args.header_value,
     };
 
     let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build(HttpsConnector::new());
 
-    let addr = matches.value_of("listen").unwrap().parse::<SocketAddr>().expect("invalid `listen` value");
-
-    let listener = TcpListener::bind(addr).await?;
+    let listener = TcpListener::bind(args.listen).await?;
 
     loop {
         let (stream, _) = listener.accept().await?;
