@@ -1,6 +1,6 @@
 // © 2019 3D Robotics. License: Apache-2.0
 use aws_sdk_s3 as s3;
-use s3::primitives::ByteStream;
+use s3::{primitives::ByteStream, error::DisplayErrorContext};
 use std::{pin::Pin, task::{Context, Poll}};
 use futures::{ future::{self, lazy}, FutureExt, TryFutureExt, stream, Stream, StreamExt };
 use bytes::Bytes;
@@ -75,7 +75,10 @@ impl StreamRange for S3Object {
                     .range(range.to_http_range_header());
 
                 let res = req.send().await
-                    .map_err(|err| { format!("S3 GetObject failed with {}", err) })?;
+                    .map_err(|err| {
+                        log::error!("S3 GetObject for {url} failed with {}", DisplayErrorContext(&err));
+                        "S3 error"
+                    })?;
 
                 log::info!("S3 get complete for {}", url);
 

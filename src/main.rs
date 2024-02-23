@@ -95,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }}))
                 .await
             {
-                error!("Error serving connection: {:?}", err);
+                error!("Error serving connection: {err}");
             }
         });
     }
