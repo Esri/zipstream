@@ -1,8 +1,10 @@
 // © 2019 3D Robotics. License: Apache-2.0
 
-use futures::stream::TryStreamExt;
-use hyper::{Request, Response, Body, StatusCode, header};
-use crate::stream_range::{ Range, StreamRange };
+use bytes::Bytes;
+use futures::{stream::TryStreamExt, StreamExt};
+use http_body_util::StreamBody;
+use hyper::{Request, Response, body::{Body, Frame}, StatusCode, header};
+use crate::stream_range::{ Range, StreamRange, BoxError };
 
 /// Parse an HTTP range header to a `Range`
 ///
@@ -73,7 +75,7 @@ fn test_range() {
 
 /// Serve a `StreamRange` in response to a `hyper` request.
 /// This handles the HTTP Range header and "206 Partial content" and associated headers if required
-pub fn hyper_response(req: &Request<Body>, content_type: &str, etag: &str, filename: &str, data: &dyn StreamRange) -> Response<Body> {
+pub fn hyper_response(req: &Request<impl Body>, content_type: &str, etag: &str, filename: &str, data: &dyn StreamRange) -> Response<impl Body<Data=Bytes, Error=BoxError>> {
     let full_len = data.len();
     let full_range = Range { start: 0, end: full_len };
 
@@ -103,14 +105,14 @@ pub fn hyper_response(req: &Request<Body>, content_type: &str, etag: &str, filen
         log::error!("Response stream error: {}", err);
     });
 
-    res.body(Body::wrap_stream(stream)).unwrap()
+    res.body(StreamBody::new(stream.map(|chunk| chunk.map(Frame::data)))).unwrap()
 }
 
 #[tokio::test]
 async fn test_base_hyper_response() {
-    use { bytes::Bytes, hyper::body::to_bytes };
+    use http_body_util::BodyExt;
     let req = Request::builder()
-        .body(Body::empty()).unwrap();
+        .body(http_body_util::Empty::<Bytes>::new()).unwrap();
 
     let data = Bytes::from_static(b"0123456789");
 
@@ -121,16 +123,17 @@ async fn test_base_hyper_response() {
     assert_eq!(res.headers().get(header::CONTENT_DISPOSITION), Some(&header::HeaderValue::from_static("attachment; filename=\"foo.zip\"")));
     assert_eq!(res.headers().get(header::ETAG), Some(&header::HeaderValue::from_static("ETAG")));
     assert_eq!(res.headers().get(header::CONTENT_LENGTH), Some(&header::HeaderValue::from_static("10")));
-    assert_eq!(to_bytes(res.into_body()).await.unwrap().as_ref(), b"0123456789");
+    assert_eq!(res.into_body().collect().await.unwrap().to_bytes().as_ref(), b"0123456789");
 }
 
 #[tokio::test]
 async fn test_range_hyper_response() {
-    use { bytes::Bytes, hyper::body::to_bytes };
+    use http_body_util::BodyExt;
+
     let req = Request::builder()
         .header(header::RANGE, "bytes=4-8")
         .header(header::IF_RANGE, "ETAG")
-        .body(Body::empty()).unwrap();
+        .body(http_body_util::Empty::<Bytes>::new()).unwrap();
 
     let data = Bytes::from_static(b"0123456789");
 
@@ -141,17 +144,17 @@ async fn test_range_hyper_response() {
     assert_eq!(res.headers().get(header::ETAG), Some(&header::HeaderValue::from_static("ETAG")));
     assert_eq!(res.headers().get(header::CONTENT_LENGTH), Some(&header::HeaderValue::from_static("5")));
     assert_eq!(res.headers().get(header::CONTENT_RANGE), Some(&header::HeaderValue::from_static("bytes 4-8/10")));
-    assert_eq!(to_bytes(res.into_body()).await.unwrap().as_ref(), b"45678");
+    assert_eq!(res.into_body().collect().await.unwrap().to_bytes().as_ref(), b"45678");
 }
 
 #[tokio::test]
 async fn test_bad_if_range_hyper_response() {
-    use { bytes::Bytes, hyper::body::to_bytes };
+    use http_body_util::BodyExt;
 
     let req = Request::builder()
         .header(header::RANGE, "bytes=4-8")
         .header(header::IF_RANGE, "WRONG")
-        .body(Body::empty()).unwrap();
+        .body(http_body_util::Empty::<Bytes>::new()).unwrap();
 
     let data = Bytes::from_static(b"0123456789");
 
@@ -160,5 +163,5 @@ async fn test_bad_if_range_hyper_response() {
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers().get(header::CONTENT_LENGTH), Some(&header::HeaderValue::from_static("10")));
     assert_eq!(res.headers().get(header::CONTENT_RANGE), None);
-    assert_eq!(to_bytes(res.into_body()).await.unwrap().as_ref(), b"0123456789");
+    assert_eq!(res.into_body().collect().await.unwrap().to_bytes().as_ref(), b"0123456789");
 }

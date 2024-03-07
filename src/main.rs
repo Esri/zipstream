@@ -2,22 +2,49 @@
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3 as s3;
 
+use bytes::Bytes;
+use http_body_util::{BodyExt, Either};
+use hyper::server::conn::http1;
+use hyper_util::rt::{TokioIo, TokioExecutor};
+use log::error;
+use tokio::net::TcpListener;
 use zipstream::{
     upstream,
-    Config
+    Config, stream_range::BoxError
 };
 
-use std::convert::Infallible;
+use std::net::SocketAddr;
 
-use clap::{Arg, App};
-use hyper::{ Client, Request, Response, Body, Server, StatusCode, client::HttpConnector };
-use hyper::service::{ make_service_fn, service_fn };
+use clap::Parser;
+use hyper::{ Request, Response, StatusCode, body::{self, Body} };
+use hyper::service::service_fn;
 use hyper_tls::HttpsConnector;
 
 #[global_allocator]
 static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-type HyperClient = Client<HttpsConnector<HttpConnector>>;
+type HyperClient = hyper_util::client::legacy::Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, http_body_util::Empty<Bytes>>;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Upstream server that provides zip file manifests
+    #[arg(long, value_name="URL")]
+    upstream: String,
+
+    /// Remove a prefix from the URL path before proxying to upstream server
+    #[arg(long, value_name="PREFIX", default_value="")]
+    pub strip_prefix: String,
+
+    /// Value passed in the X-Via-Zip-Stream header on the request to the upstream server
+    #[arg(long, value_name="VAL", default_value="true")]
+    pub header_value: String,
+
+    /// IP:port to listen for HTTP connections
+    #[arg(long, value_name="IP:PORT", default_value="[::1]:3000")]
+    pub listen: SocketAddr,
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -28,71 +55,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log_panics::init();
     log::info!("Startup");
 
-    let matches = App::new("zipstream")
-        .arg(Arg::with_name("upstream")
-            .long("upstream")
-            .takes_value(true)
-            .help("Upstream server that provides zip file manifests")
-            .value_name("URL")
-            .required(true))
-        .arg(Arg::with_name("strip-prefix")
-            .long("strip-prefix")
-            .takes_value(true)
-            .help("Remove a prefix from the URL path before proxying to upstream server")
-            .default_value(""))
-        .arg(Arg::with_name("header-value")
-            .long("header-value")
-            .takes_value(true)
-            .help("Value passed in the X-Via-Zip-Stream header on the request to the upstream server")
-            .default_value("true"))
-        .arg(Arg::with_name("listen")
-            .long("listen")
-            .takes_value(true)
-            .help("IP:port to listen for HTTP connections")
-            .default_value("127.0.0.1:3000"))
-        .get_matches();
+    let args = Args::parse();
 
     let region_provider = RegionProviderChain::default_provider();
-    let s3_config = aws_config::from_env().region(region_provider).load().await;
+    let s3_config = aws_config::defaults(aws_config::BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
     let s3_client = s3::Client::new(&s3_config);
 
     let config = Config {
-        upstream: matches.value_of("upstream").unwrap().into(),
-        strip_prefix:matches.value_of("strip-prefix").unwrap().into(),
-        via_zip_stream_header_value: matches.value_of("header-value").unwrap().into(),
+        upstream: args.upstream,
+        strip_prefix: args.strip_prefix,
+        via_zip_stream_header_value: args.header_value,
     };
 
-    let client = Client::builder().build::<_, hyper::Body>(HttpsConnector::new());
+    let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build(HttpsConnector::new());
 
-    let addr = matches.value_of("listen").unwrap().parse().expect("invalid `listen` value");
+    let listener = TcpListener::bind(args.listen).await?;
 
-    let new_svc = make_service_fn(move |_conn| {
+    loop {
+        let (stream, _) = listener.accept().await?;
+
         let client = client.clone();
         let s3_client = s3_client.clone();
         let config = config.clone();
 
-        async {
-            Ok::<_, Infallible>(service_fn(move |req| {
-                let client = client.clone();
-                let s3_client = s3_client.clone();
-                let config = config.clone();
+        let io = TokioIo::new(stream);
 
-                async move {
-                    Ok::<_, Infallible>(match handle_request(req, &client, s3_client, &config).await {
-                        Ok(response) => response,
-                        Err((status, message)) => Response::builder().status(status).body(message.into()).unwrap(),
-                    })
-                }
-            }))
-        }
-    });
-
-    Server::bind(&addr).serve(new_svc).await?;
-
-    Ok(())
+        tokio::task::spawn(async move {
+            if let Err(err) = http1::Builder::new()
+                .serve_connection(io, service_fn(|req| { async {
+                    match handle_request(req, &client, s3_client.clone(), &config).await {
+                        Ok(res) => Ok(res.map(Either::Right)),
+                        Err((status, msg)) => {
+                            Response::builder().status(status).body(Either::Left(http_body_util::Full::new(Bytes::from(msg))))
+                        }
+                    }
+                }}))
+                .await
+            {
+                error!("Error serving connection: {err}");
+            }
+        });
+    }
 }
 
-async fn handle_request(req: Request<Body>, client: &HyperClient, s3_client: s3::Client, config: &Config) -> Result<Response<Body>, (StatusCode, &'static str)> {
+async fn handle_request(
+    req: Request<body::Incoming>,
+    client: &HyperClient,
+    s3_client: s3::Client,
+    config: &Config
+) -> Result<
+        Response<Either<body::Incoming, impl Body<Data=Bytes, Error=BoxError>>>,
+        (StatusCode, &'static str)
+    > {
     log::info!("Request: {} {}", req.method(), req.uri());
     let upstream_req = upstream::request(config, &req)?;
     let upstream_res = client.request(upstream_req).await.map_err(|e| {
@@ -101,14 +115,14 @@ async fn handle_request(req: Request<Body>, client: &HyperClient, s3_client: s3:
     })?;
 
     if upstream_res.headers().get("X-Zip-Stream").is_some() {
-        let body = hyper::body::to_bytes(upstream_res.into_body()).await.map_err(|e| {
+        let body = upstream_res.into_body().collect().await.map_err(|e| {
             log::error!("Failed to read upstream body: {}", e);
             (StatusCode::SERVICE_UNAVAILABLE, "Upstream request failed")
         })?;
 
-        upstream::response(s3_client, &req, body)
+        upstream::response(s3_client, &req, body.to_bytes()).map(|res| res.map(Either::Right))
     } else {
         log::info!("Request proxied from upstream");
-        Ok(upstream_res)
+        Ok(upstream_res.map(Either::Left))
     }
 }

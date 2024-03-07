@@ -3,10 +3,15 @@
 /// proxied request URL and headers to generate a manifest like the one below.
 
 use std::convert::Infallible;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
+use bytes::Bytes;
+use hyper::service::service_fn;
+use hyper::{Request, Response, body::Body};
+use hyper::server::conn::http1;
+use hyper_util::rt::TokioIo;
+use tokio::net::TcpListener;
+use std::net::SocketAddr;
 
-async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn handler(req: Request<impl Body>) -> Result<Response<impl Body<Data=Bytes, Error=Infallible>>, Infallible> {
     eprintln!("Demo server got a request for {}", req.uri());
 
     let res = r#"
@@ -34,19 +39,28 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     Ok(Response::builder()
       .header("Content-type", "application/json")
       .header("X-Zip-Stream", "true")
-      .body(Body::from(res))
+      .body(http_body_util::Full::new(Bytes::from(res)))
       .unwrap()
     )
 }
 
 #[tokio::main]
 pub async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let make_svc = make_service_fn(|_conn| {
-        async { Ok::<_, Infallible>(service_fn(handler)) }
-    });
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
+    let listener = TcpListener::bind(addr).await?;
 
-    let addr = ([127, 0, 0, 1], 3001).into();
-    Server::bind(&addr).serve(make_svc).await?;
+    loop {
+        let (stream, _) = listener.accept().await?;
 
-    Ok(())
+        let io = TokioIo::new(stream);
+
+        tokio::task::spawn(async move {
+            if let Err(err) = http1::Builder::new()
+                .serve_connection(io, service_fn(handler))
+                .await
+            {
+                println!("Error serving connection: {:?}", err);
+            }
+        });
+    }
 }
