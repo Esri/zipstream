@@ -4,7 +4,7 @@ use bytes::Bytes;
 use futures::{stream::TryStreamExt, StreamExt};
 use http_body_util::StreamBody;
 use hyper::{Request, Response, body::{Body, Frame}, StatusCode, header};
-use crate::stream_range::{ Range, StreamRange, BoxError };
+use crate::{error::Report, stream_range::{ BoxError, Range, StreamRange }};
 
 /// Parse an HTTP range header to a `Range`
 ///
@@ -102,7 +102,7 @@ pub fn hyper_response(req: &Request<impl Body>, content_type: &str, etag: &str, 
     res = res.header(header::CONTENT_LENGTH, range.len());
 
     let stream = data.stream_range(range).inspect_err(|err| {
-        log::error!("Response stream error: {}", err);
+        log::error!("Response stream error: {}", Report(&**err));
     });
 
     res.body(StreamBody::new(stream.map(|chunk| chunk.map(Frame::data)))).unwrap()
