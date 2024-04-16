@@ -6,7 +6,6 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Either};
 use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioExecutor};
-use log::error;
 use tokio::net::TcpListener;
 use zipstream::{
     upstream,
@@ -93,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }}))
                 .await
             {
-                error!("Error serving connection: {}", Report(err));
+                log::warn!("Error serving connection: {}", Report(err));
             }
         });
     }
