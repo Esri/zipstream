@@ -3,6 +3,7 @@ pub mod serve_range;
 pub mod zip;
 pub mod upstream;
 pub mod s3url;
+pub mod error;
 
 
 #[derive(Clone)]

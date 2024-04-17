@@ -6,11 +6,11 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Either};
 use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioExecutor};
-use log::error;
 use tokio::net::TcpListener;
 use zipstream::{
     upstream,
-    Config, stream_range::BoxError
+    Config, stream_range::BoxError,
+    error::Report,
 };
 
 use std::net::SocketAddr;
@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }}))
                 .await
             {
-                error!("Error serving connection: {err}");
+                log::warn!("Error serving connection: {}", Report(err));
             }
         });
     }
@@ -110,13 +110,13 @@ async fn handle_request(
     log::info!("Request: {} {}", req.method(), req.uri());
     let upstream_req = upstream::request(config, &req)?;
     let upstream_res = client.request(upstream_req).await.map_err(|e| {
-        log::error!("Failed to connect upstream: {}", e);
+        log::error!("Failed to connect upstream: {}", Report(e));
         (StatusCode::SERVICE_UNAVAILABLE, "Upstream connection failed")
     })?;
 
     if upstream_res.headers().get("X-Zip-Stream").is_some() {
         let body = upstream_res.into_body().collect().await.map_err(|e| {
-            log::error!("Failed to read upstream body: {}", e);
+            log::error!("Failed to read upstream body: {}", Report(e));
             (StatusCode::SERVICE_UNAVAILABLE, "Upstream request failed")
         })?;
 
