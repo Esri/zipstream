@@ -4,6 +4,7 @@ use s3::{primitives::ByteStream, error::DisplayErrorContext};
 use std::{pin::Pin, task::{Context, Poll}};
 use futures::{ future::{self, lazy}, FutureExt, TryFutureExt, stream, Stream, StreamExt };
 use bytes::Bytes;
+use tracing::{info, error};
 
 pub type BoxBytesStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send +'static>>;
 pub type BoxError = Box<dyn std::error::Error + 'static + Sync + Send>;
@@ -28,6 +29,10 @@ impl Range {
 
     pub fn to_http_range_header(self) -> String {
         format!("bytes={}-{}", self.start, self.end-1)
+    }
+
+    pub(crate) fn limit_end(&self, full_len: u64) -> Range {
+        Range { start: self.start, end: self.end.min(full_len) }
     }
 }
 
@@ -76,14 +81,14 @@ impl StreamRange for S3Object {
 
                 let res = req.send().await
                     .map_err(|err| {
-                        log::error!("S3 GetObject for {url} failed with {}", DisplayErrorContext(&err));
+                        error!("S3 GetObject for {url} failed with {}", DisplayErrorContext(&err));
                         "S3 error"
                     })?;
 
-                log::info!("S3 get complete for {}", url);
+                info!("S3 get complete for {}", url);
 
                 if res.content_length != Some(len as i64) {
-                    log::error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
+                    error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
                 }
 
                 Ok(ByteStreamWrap(res.body))

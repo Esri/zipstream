@@ -1,10 +1,14 @@
 // © 2019 3D Robotics. License: Apache-2.0
 
+use std::{pin::Pin, task::Poll};
+
 use bytes::Bytes;
-use futures::{stream::TryStreamExt, StreamExt};
+use futures::{Stream, StreamExt};
+use crate::stream_range::BoxBytesStream;
 use http_body_util::StreamBody;
 use hyper::{Request, Response, body::{Body, Frame}, StatusCode, header};
-use crate::{error::Report, stream_range::{ BoxError, Range, StreamRange }};
+use crate::stream_range::{ BoxError, Range, StreamRange };
+use tracing::{error, info, Span};
 
 /// Parse an HTTP range header to a `Range`
 ///
@@ -94,18 +98,82 @@ pub fn hyper_response(req: &Request<impl Body>, content_type: &str, etag: &str, 
     if let Some(range) = range {
         res = res.status(StatusCode::PARTIAL_CONTENT)
                  .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", range.start, range.end - 1, full_len));
-        log::info!("Serving range {:?}", range);
+        info!("Serving range {:?}", range);
     }
 
-    let range = range.unwrap_or(full_range);
+    let range = range.unwrap_or(full_range).limit_end(full_len);
 
     res = res.header(header::CONTENT_LENGTH, range.len());
 
-    let stream = data.stream_range(range).inspect_err(|err| {
-        log::error!("Response stream error: {}", Report(&**err));
-    });
+    let stream = StreamMonitor::new(data.stream_range(range), range.len());
 
     res.body(StreamBody::new(stream.map(|chunk| chunk.map(Frame::data)))).unwrap()
+}
+
+/// Wraps a `BoxByteStream` with `tracing` instrumentation. The data is passed
+/// through unchanged.
+/// 
+/// * Tracks the progress of the download, and on Drop logs whether the download
+/// was completed or cancelled. Hyper drops the body stream after the specified
+/// content-length is reached, so we do not see the `Stream::poll_next` return
+/// `None` when the stream signals its own end. Ideally, Hyper would offer a
+/// better way to follow the status of a download after the `Body` is passed to
+/// Hyper: https://github.com/hyperium/hyper/issues/2181
+/// 
+/// * Stores a `tracing::Span` and enters it when polling the Stream, like
+/// `Instrument`. The `Instrument` in `tracing` does not impl `Stream`. The one
+/// in `tracing-futures` does, but it hasn't been released recently, and the
+/// released version 0.2.5 does not include the change to enter the `Span` on
+/// drop, which we need here for the logging in the `Drop` impl.
+/// 
+/// * Logs any errors returned from the stream, which could be done with
+/// `TryStreamExt::instrument_err`, but this is already intercepting `poll_next`
+/// so it's simple to do there.
+struct StreamMonitor {
+    stream: BoxBytesStream,
+    span: Span,
+    pos: u64,
+    len: u64,
+}
+
+impl StreamMonitor {
+    fn new(stream: BoxBytesStream, len: u64) -> Self {
+        Self { stream, pos: 0, len, span: Span::current() }
+    }
+}
+
+impl Stream for StreamMonitor {
+    type Item = Result<Bytes, BoxError>;
+
+    fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let _entered = this.span.enter();
+        let r = Pin::new(&mut this.stream).poll_next(cx);
+
+        match &r {
+            Poll::Pending => {},
+            Poll::Ready(Some(Ok(bytes))) => {
+                this.pos += bytes.len() as u64;
+            }
+            Poll::Ready(Some(Err(err))) => {
+                error!(position = this.pos, "Response stream error: {}", err);
+            }
+            Poll::Ready(None) => {}
+        }
+
+        r
+    }
+}
+
+impl Drop for StreamMonitor {
+    fn drop(&mut self) {
+        let _entered = self.span.enter();
+        if self.pos >= self.len {
+            info!(length = self.len, "Download complete");
+        } else {
+            info!(length = self.len, position = self.pos, "Download cancelled");
+        }
+    }
 }
 
 #[tokio::test]

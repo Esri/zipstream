@@ -11,6 +11,7 @@ use hyper::{header, body::{self, Body}, Request, Response, Uri, Method, StatusCo
 use serde_derive::Deserialize;
 use std::hash::{ Hash, Hasher };
 use chrono::{DateTime, Utc};
+use tracing::{info, error};
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct ZipFileDescription {
@@ -62,7 +63,7 @@ pub fn request(config: &Config, req: &Request<body::Incoming>) -> Result<Request
 /// Parse an upstream JSON response and produce a streaming zip file response
 pub fn response(client: s3::Client, req: &Request<body::Incoming>, response_body: Bytes) -> Result<Response<impl Body<Data=Bytes, Error=BoxError>>, (StatusCode, &'static str)> {
     let mut res: UpstreamResponse = serde_json::from_slice(&response_body[..]).map_err(|e| {
-        log::error!("Invalid upstream response JSON: {}", e);
+        error!("Invalid upstream response JSON: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse upstream request")
     })?;
     
@@ -95,7 +96,7 @@ pub fn response(client: s3::Client, req: &Request<body::Incoming>, response_body
 
     let stream = zip_stream(entries, ZipOptions::default());
 
-    log::info!("Streaming zip file {}: {} entries, {} bytes", res.filename, num_entries, stream.len());
+    info!("Streaming zip file {}: {} entries, {} bytes", res.filename, num_entries, stream.len());
 
     Ok(hyper_response(req, "application/zip", &etag, &res.filename, &stream))
 }

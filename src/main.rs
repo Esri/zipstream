@@ -19,6 +19,7 @@ use clap::Parser;
 use hyper::{ Request, Response, StatusCode, body::{self, Body} };
 use hyper::service::service_fn;
 use hyper_tls::HttpsConnector;
+use tracing::{error, info, info_span, warn, Instrument};
 
 #[global_allocator]
 static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
@@ -48,14 +49,17 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut logger = env_logger::Builder::from_default_env();
-    logger.filter_module("zipstream", log::LevelFilter::Info);
-    logger.write_style(env_logger::WriteStyle::Never);
-    logger.init();
     log_panics::init();
-    log::info!("Startup");
-
     let args = Args::parse();
+
+    let subscriber = tracing_subscriber::fmt()
+        .json()
+        .flatten_event(true)
+        .with_current_span(false)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)?;
+    
+    info!("Startup");
 
     let region_provider = RegionProviderChain::default_provider();
     let s3_config = aws_config::defaults(aws_config::BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
@@ -72,7 +76,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind(args.listen).await?;
 
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, addr) = listener.accept().await?;
+
+        let span = info_span!(
+            "connection",
+            socket_addr = ?addr,
+        );
 
         let client = client.clone();
         let s3_client = s3_client.clone();
@@ -83,7 +92,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tokio::task::spawn(async move {
             if let Err(err) = http1::Builder::new()
                 .serve_connection(io, service_fn(|req| { async {
-                    match handle_request(req, &client, s3_client.clone(), &config).await {
+                    let span = info_span!(
+                        "request",
+                        method = ?req.method(),
+                        uri = ?req.uri(),
+                    );
+
+                    match handle_request(req, &client, s3_client.clone(), &config).instrument(span).await {
                         Ok(res) => Ok(res.map(Either::Right)),
                         Err((status, msg)) => {
                             Response::builder().status(status).body(Either::Left(http_body_util::Full::new(Bytes::from(msg))))
@@ -92,9 +107,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }}))
                 .await
             {
-                log::warn!("Error serving connection: {}", Report(err));
+                warn!("Error serving connection: {}", Report(err));
             }
-        });
+        }.instrument(span));
     }
 }
 
@@ -107,22 +122,22 @@ async fn handle_request(
         Response<Either<body::Incoming, impl Body<Data=Bytes, Error=BoxError>>>,
         (StatusCode, &'static str)
     > {
-    log::info!("Request: {} {}", req.method(), req.uri());
+    info!("Request: {} {}", req.method(), req.uri());
     let upstream_req = upstream::request(config, &req)?;
     let upstream_res = client.request(upstream_req).await.map_err(|e| {
-        log::error!("Failed to connect upstream: {}", Report(e));
+        error!("Failed to connect upstream: {}", Report(e));
         (StatusCode::SERVICE_UNAVAILABLE, "Upstream connection failed")
     })?;
 
     if upstream_res.headers().get("X-Zip-Stream").is_some() {
         let body = upstream_res.into_body().collect().await.map_err(|e| {
-            log::error!("Failed to read upstream body: {}", Report(e));
+            error!("Failed to read upstream body: {}", Report(e));
             (StatusCode::SERVICE_UNAVAILABLE, "Upstream request failed")
         })?;
 
         upstream::response(s3_client, &req, body.to_bytes()).map(|res| res.map(Either::Right))
     } else {
-        log::info!("Request proxied from upstream");
+        info!("Request proxied from upstream");
         Ok(upstream_res.map(Either::Left))
     }
 }
