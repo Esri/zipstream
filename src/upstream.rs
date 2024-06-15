@@ -96,7 +96,10 @@ pub fn response(client: s3::Client, req: &Request<body::Incoming>, response_body
 
     let stream = zip_stream(entries, ZipOptions::default());
 
-    info!("Streaming zip file {}: {} entries, {} bytes", res.filename, num_entries, stream.len());
+    info!(
+        zipstream.entries = num_entries,
+        "Streaming zip file {}: {} entries, {} bytes", res.filename, num_entries, stream.len()
+    );
 
     Ok(hyper_response(req, "application/zip", &etag, &res.filename, &stream))
 }

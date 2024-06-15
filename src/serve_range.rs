@@ -1,10 +1,10 @@
 // © 2019 3D Robotics. License: Apache-2.0
 
-use std::{pin::Pin, task::Poll};
+use std::{error::Error, pin::Pin, task::Poll};
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use crate::stream_range::BoxBytesStream;
+use crate::{error::Report, stream_range::BoxBytesStream};
 use http_body_util::StreamBody;
 use hyper::{Request, Response, body::{Body, Frame}, StatusCode, header};
 use crate::stream_range::{ BoxError, Range, StreamRange };
@@ -134,11 +134,18 @@ struct StreamMonitor {
     span: Span,
     pos: u64,
     len: u64,
+    errored: bool,
 }
 
 impl StreamMonitor {
     fn new(stream: BoxBytesStream, len: u64) -> Self {
-        Self { stream, pos: 0, len, span: Span::current() }
+
+        info!(
+            http.response.body.bytes = len,
+            "Download started"
+        );
+
+        Self { stream, pos: 0, len, span: Span::current(), errored: false }
     }
 }
 
@@ -156,7 +163,12 @@ impl Stream for StreamMonitor {
                 this.pos += bytes.len() as u64;
             }
             Poll::Ready(Some(Err(err))) => {
-                error!(position = this.pos, "Response stream error: {}", err);
+                error!(
+                    http.response.body.bytes = this.len,
+                    http.response.body.progress = this.pos,
+                    "Response stream error: {}", Report(&**err as &(dyn Error + 'static))
+                );
+                this.errored = true;
             }
             Poll::Ready(None) => {}
         }
@@ -168,11 +180,21 @@ impl Stream for StreamMonitor {
 impl Drop for StreamMonitor {
     fn drop(&mut self) {
         let _entered = self.span.enter();
-        if self.pos >= self.len {
-            info!(length = self.len, "Download complete");
+
+        let status = if self.pos >= self.len {
+            "complete"
+        } else if self.errored {
+            "failed"
         } else {
-            info!(length = self.len, position = self.pos, "Download cancelled");
-        }
+            "canceled"
+        };
+
+        info!(
+            http.response.body.bytes = self.len,
+            http.response.body.progress = self.pos,
+            zipstream.result = status,
+            "Download {}", status
+        );
     }
 }
 

@@ -27,4 +27,5 @@ jemallocator = "0.5.0"
 jemalloc-sys = { version = "0.5.0", features = ["background_threads"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["json"] }
+uuid = { version = "1.8.0", features = ["v7"] }
 

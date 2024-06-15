@@ -80,9 +80,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .serve_connection(io, service_fn(|req| { async {
                     let span = info_span!(
                         "request",
-                        method = ?req.method(),
-                        uri = ?req.uri(),
+                        id = %uuid::Uuid::now_v7().simple(),
+                        path = req.uri().path(),
                     );
+
+                    span.in_scope(|| {
+                        info!(
+                            http.request.method = ?req.method(),
+                            url.path = req.uri().path(),
+                            http.request.raw_headers = ?req.headers(),
+                            "{:?} {}", req.method(), req.uri(),
+                        )
+                    });
 
                     match app.handle_request(req).instrument(span).await {
                         Ok(res) => Ok(res.map(Either::Right)),
