@@ -61,33 +61,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     
     info!("Startup");
 
-    let region_provider = RegionProviderChain::default_provider();
-    let s3_config = aws_config::defaults(aws_config::BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
-    let s3_client = s3::Client::new(&s3_config);
-
-    let config = Config {
+    let app = App::new(Config {
         upstream: args.upstream,
         strip_prefix: args.strip_prefix,
         via_zip_stream_header_value: args.header_value,
-    };
-
-    let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build(HttpsConnector::new());
+    }).await;
 
     let listener = TcpListener::bind(args.listen).await?;
 
     loop {
-        let (stream, addr) = listener.accept().await?;
-
-        let span = info_span!(
-            "connection",
-            socket_addr = ?addr,
-        );
-
-        let client = client.clone();
-        let s3_client = s3_client.clone();
-        let config = config.clone();
-
+        let (stream, _) = listener.accept().await?;
         let io = TokioIo::new(stream);
+
+        let app = app.clone();
 
         tokio::task::spawn(async move {
             if let Err(err) = http1::Builder::new()
@@ -98,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         uri = ?req.uri(),
                     );
 
-                    match handle_request(req, &client, s3_client.clone(), &config).instrument(span).await {
+                    match app.handle_request(req).instrument(span).await {
                         Ok(res) => Ok(res.map(Either::Right)),
                         Err((status, msg)) => {
                             Response::builder().status(status).body(Either::Left(http_body_util::Full::new(Bytes::from(msg))))
@@ -109,35 +95,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             {
                 warn!("Error serving connection: {}", Report(err));
             }
-        }.instrument(span));
+        });
     }
 }
 
-async fn handle_request(
-    req: Request<body::Incoming>,
-    client: &HyperClient,
+#[derive(Clone)]
+struct App {
+    config: Config,
+    upstream_client: HyperClient,
     s3_client: s3::Client,
-    config: &Config
-) -> Result<
+}
+
+impl App {
+    async fn new(config: Config) -> App {
+        let upstream_client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build(HttpsConnector::new());
+
+        let region_provider = RegionProviderChain::default_provider();
+        let s3_config = aws_config::defaults(aws_config::BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
+        let s3_client = s3::Client::new(&s3_config);
+
+        App { config, upstream_client, s3_client }
+    }
+
+    async fn handle_request(&self, req: Request<body::Incoming>) -> Result<
         Response<Either<body::Incoming, impl Body<Data=Bytes, Error=BoxError>>>,
         (StatusCode, &'static str)
     > {
-    info!("Request: {} {}", req.method(), req.uri());
-    let upstream_req = upstream::request(config, &req)?;
-    let upstream_res = client.request(upstream_req).await.map_err(|e| {
-        error!("Failed to connect upstream: {}", Report(e));
-        (StatusCode::SERVICE_UNAVAILABLE, "Upstream connection failed")
-    })?;
-
-    if upstream_res.headers().get("X-Zip-Stream").is_some() {
-        let body = upstream_res.into_body().collect().await.map_err(|e| {
-            error!("Failed to read upstream body: {}", Report(e));
-            (StatusCode::SERVICE_UNAVAILABLE, "Upstream request failed")
+        let upstream_req = upstream::request(&self.config, &req)?;
+        let upstream_res = self.upstream_client.request(upstream_req).await.map_err(|e| {
+            error!("Failed to connect upstream: {}", Report(e));
+            (StatusCode::SERVICE_UNAVAILABLE, "Upstream connection failed")
         })?;
 
-        upstream::response(s3_client, &req, body.to_bytes()).map(|res| res.map(Either::Right))
-    } else {
-        info!("Request proxied from upstream");
-        Ok(upstream_res.map(Either::Left))
+        if upstream_res.headers().get("X-Zip-Stream").is_some() {
+            let body = upstream_res.into_body().collect().await.map_err(|e| {
+                error!("Failed to read upstream body: {}", Report(e));
+                (StatusCode::SERVICE_UNAVAILABLE, "Upstream request failed")
+            })?;
+
+            upstream::response(self.s3_client.clone(), &req, body.to_bytes()).map(|res| res.map(Either::Right))
+        } else {
+            info!("Response proxied from upstream");
+            Ok(upstream_res.map(Either::Left))
+        }
     }
 }
