@@ -13,13 +13,13 @@ use zipstream::{
     error::Report,
 };
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use clap::Parser;
 use hyper::{ Request, Response, StatusCode, body::{self, Body} };
 use hyper::service::service_fn;
 use hyper_tls::HttpsConnector;
-use tracing::{error, info, info_span, warn, Instrument};
+use tracing::{error, event, info, info_span, warn, Instrument, Level};
 
 #[global_allocator]
 static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
@@ -60,6 +60,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing::subscriber::set_global_default(subscriber)?;
     
     info!("Startup");
+
+    tokio::task::spawn(log_metrics());
 
     let app = App::new(Config {
         upstream: args.upstream,
@@ -147,5 +149,25 @@ impl App {
             info!("Response proxied from upstream");
             Ok(upstream_res.map(Either::Left))
         }
+    }
+}
+
+async fn log_metrics() {
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+
+    loop {
+        interval.tick().await;
+
+        jemalloc_ctl::epoch::advance().unwrap();
+        let allocated = jemalloc_ctl::stats::allocated::read().unwrap();
+        let resident = jemalloc_ctl::stats::resident::read().unwrap();
+
+        let active_downloads = zipstream::serve_range::active_downloads();
+
+        event!(target: "zipstream::metrics", Level::INFO,
+            zipstream.active_downloads = active_downloads,
+            jemalloc.allocated = allocated,
+            jemalloc.resident = resident,
+        )
     }
 }

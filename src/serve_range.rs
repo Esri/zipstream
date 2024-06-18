@@ -1,6 +1,6 @@
 // © 2019 3D Robotics. License: Apache-2.0
 
-use std::{error::Error, pin::Pin, task::Poll};
+use std::{error::Error, pin::Pin, sync::atomic::{AtomicU32, Ordering}, task::Poll};
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
@@ -137,11 +137,19 @@ struct StreamMonitor {
     errored: bool,
 }
 
+static ACTIVE_DOWNLOADS: AtomicU32 = AtomicU32::new(0);
+
+pub fn active_downloads() -> u32 {
+    ACTIVE_DOWNLOADS.load(Ordering::Relaxed)
+}
+
 impl StreamMonitor {
     fn new(stream: BoxBytesStream, len: u64) -> Self {
+        let active = ACTIVE_DOWNLOADS.fetch_add(1, Ordering::Relaxed) + 1;
 
         info!(
             http.response.body.bytes = len,
+            zipstream.active_downloads = active,
             "Download started"
         );
 
@@ -181,6 +189,8 @@ impl Drop for StreamMonitor {
     fn drop(&mut self) {
         let _entered = self.span.enter();
 
+        let active = ACTIVE_DOWNLOADS.fetch_sub(1, Ordering::Relaxed) - 1;
+
         let status = if self.pos >= self.len {
             "complete"
         } else if self.errored {
@@ -192,6 +202,7 @@ impl Drop for StreamMonitor {
         info!(
             http.response.body.bytes = self.len,
             http.response.body.progress = self.pos,
+            zipstream.active_downloads = active,
             zipstream.result = status,
             "Download {}", status
         );
