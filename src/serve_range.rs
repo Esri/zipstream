@@ -1,6 +1,6 @@
 // © 2019 3D Robotics. License: Apache-2.0
 
-use std::{error::Error, pin::Pin, sync::atomic::{AtomicU32, Ordering}, task::Poll};
+use std::{error::Error, pin::Pin, sync::atomic::{AtomicU32, Ordering}, task::Poll, time::Instant};
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
@@ -134,6 +134,7 @@ struct StreamMonitor {
     span: Span,
     pos: u64,
     len: u64,
+    start_time: Instant,
     errored: bool,
 }
 
@@ -153,7 +154,14 @@ impl StreamMonitor {
             "Download started"
         );
 
-        Self { stream, pos: 0, len, span: Span::current(), errored: false }
+        Self {
+            stream,
+            len,
+            span: Span::current(),
+            errored: false,
+            pos: 0,
+            start_time: Instant::now(),
+        }
     }
 }
 
@@ -204,6 +212,7 @@ impl Drop for StreamMonitor {
             http.response.body.progress = self.pos,
             zipstream.active_downloads = active,
             zipstream.result = status,
+            time = self.start_time.elapsed().as_secs_f64() * 1000.0,
             "Download {}", status
         );
     }
