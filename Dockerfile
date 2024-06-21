@@ -36,3 +36,4 @@ COPY --from=build /crate/target/release/zipstream /usr/local/bin/
 USER 2000
 CMD ["zipstream"]
 EXPOSE 3000
+LABEL log-format="tracing-subscriber-json"

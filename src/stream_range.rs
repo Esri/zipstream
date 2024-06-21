@@ -1,9 +1,10 @@
 // © 2019 3D Robotics. License: Apache-2.0
 use aws_sdk_s3 as s3;
-use s3::{primitives::ByteStream, error::DisplayErrorContext};
-use std::{pin::Pin, task::{Context, Poll}};
+use s3::primitives::ByteStream;
+use std::{error::Error, fmt::Display, pin::Pin, task::{Context, Poll}};
 use futures::{ future::{self, lazy}, FutureExt, TryFutureExt, stream, Stream, StreamExt };
 use bytes::Bytes;
+use tracing::{info, error};
 
 pub type BoxBytesStream = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send +'static>>;
 pub type BoxError = Box<dyn std::error::Error + 'static + Sync + Send>;
@@ -28,6 +29,10 @@ impl Range {
 
     pub fn to_http_range_header(self) -> String {
         format!("bytes={}-{}", self.start, self.end-1)
+    }
+
+    pub(crate) fn limit_end(&self, full_len: u64) -> Range {
+        Range { start: self.start, end: self.end.min(full_len) }
     }
 }
 
@@ -75,20 +80,36 @@ impl StreamRange for S3Object {
                     .range(range.to_http_range_header());
 
                 let res = req.send().await
-                    .map_err(|err| {
-                        log::error!("S3 GetObject for {url} failed with {}", DisplayErrorContext(&err));
-                        "S3 error"
-                    })?;
+                    .map_err(|inner| { S3Error { inner, url: url.clone() }})?;
 
-                log::info!("S3 get complete for {}", url);
+                info!("S3 get complete for {}", url);
 
                 if res.content_length != Some(len as i64) {
-                    log::error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
+                    error!("S3 file size mismatch for {}, expected {:?}, got {:?}", url, len, res.content_length)
                 }
 
                 Ok(ByteStreamWrap(res.body))
             })
         }).flatten().try_flatten_stream())
+    }
+}
+
+/// Wraps the error from S3 with context on the S3 URL
+#[derive(Debug, Clone)]
+struct S3Error<T> {
+    inner: T,
+    url: String,
+}
+
+impl<T> Display for S3Error<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "S3 GetObject for {} failed", self.url)
+    }
+}
+
+impl<T> Error for S3Error<T> where T: Error + 'static {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.inner)
     }
 }
 
