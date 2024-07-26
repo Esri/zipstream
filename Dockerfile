@@ -1,4 +1,4 @@
-FROM rust:1.79.0-alpine@sha256:71c9d7afe57ce0c6c53573544e33fbdc88275446fb5c84c78272d6c155b7c847 as base
+FROM rust:1.80.0-alpine@sha256:596c7fa13f7458097b8c88ad83f33420da0341e2f5b544e34d9aa18a22fe11d0 as base
 
 FROM base as build
 
