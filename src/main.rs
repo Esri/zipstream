@@ -18,7 +18,7 @@ use std::{net::SocketAddr, time::Duration};
 use clap::Parser;
 use hyper::{ Request, Response, StatusCode, body::{self, Body} };
 use hyper::service::service_fn;
-use hyper_tls::HttpsConnector;
+use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use tracing::{error, event, info, info_span, warn, Instrument, Level};
 
 #[global_allocator]
@@ -119,7 +119,13 @@ struct App {
 
 impl App {
     async fn new(config: Config) -> App {
-        let upstream_client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build(HttpsConnector::new());
+        let https = HttpsConnectorBuilder::new()
+            .with_native_roots().expect("failed to load native CA root certificates")
+            .https_or_http()
+            .enable_http1()
+            .build();
+
+        let upstream_client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build(https);
 
         let region_provider = RegionProviderChain::default_provider();
         let s3_config = aws_config::defaults(aws_config::BehaviorVersion::v2023_11_09()).region(region_provider).load().await;

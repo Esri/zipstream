@@ -3,7 +3,7 @@ FROM rust:1.87.0-alpine@sha256:126df0f2a57e675f9306fe180b833982ffb996e90a92a793b
 FROM base as build
 
 # Build and cache dependencies
-RUN apk add --no-cache musl-dev openssl-dev pkgconf make unzip python3
+RUN apk add --no-cache musl-dev pkgconf make unzip python3
 RUN mkdir -p /crate/src/ && echo 'fn main(){}' > /crate/src/main.rs
 WORKDIR /crate
 COPY Cargo.toml .
@@ -25,7 +25,7 @@ RUN cargo test --release
 FROM base as chroot
 RUN apk add --no-cache --root /chroot --initdb \
             --keys-dir /etc/apk/keys --repositories-file /etc/apk/repositories \
-            libgcc openssl
+            libgcc
 # ca-certificates package pulls in busybox, so just copy the output
 RUN mkdir -p /chroot/etc/ssl/certs/ && cp /etc/ssl/certs/ca-certificates.crt /chroot/etc/ssl/certs/ca-certificates.crt
 
