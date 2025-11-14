@@ -128,7 +128,7 @@ impl App {
         let upstream_client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build(https);
 
         let region_provider = RegionProviderChain::default_provider();
-        let s3_config = aws_config::defaults(aws_config::BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
+        let s3_config = aws_config::defaults(aws_config::BehaviorVersion::v2025_08_07()).region(region_provider).load().await;
         let s3_client = s3::Client::new(&s3_config);
 
         App { config, upstream_client, s3_client }
